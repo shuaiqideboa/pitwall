@@ -6,7 +6,7 @@ import { DIE_ROLL_MS } from './components/Die3D';
 import { type CarAnim, type CarPos, Cars, useCarPoses } from './components/Cars';
 import { FOLLOW_ZOOM, LOOK_AHEAD, useCamera } from './components/camera';
 import { MiniMap } from './components/MiniMap';
-import { PitWallChat } from './components/PitWallChat';
+import { Home } from './components/Home';
 import { useAccount } from './account';
 import { type Cue, cueLog, isMuted, playCue, setMuted } from './audio';
 import { TOTAL_LAPS, TRACK_LENGTH } from './game/board';
@@ -102,7 +102,7 @@ export default function App() {
   const [anim, setAnim] = useState<CarAnim | null>(null);
   const [follow, setFollow] = useState(true);
   const [account, setAccount] = useAccount();
-  const [authOpen, setAuthOpen] = useState(false);
+  const [screen, setScreen] = useState<'home' | 'race'>('home');
   const busy = useRef(false);
   const driveCount = useRef(0);
 
@@ -203,6 +203,18 @@ export default function App() {
   const activeBox = focus.pit && live ? focus.progress % TRACK_LENGTH : null;
   const request = phase === 'idle' ? state.tyreQueue[0] : undefined;
 
+  if (screen === 'home') {
+    return (
+      <Home
+        accent={ACCENT}
+        raceStarted={state.stage !== 'grid' || state.players.some((p) => p.tyre !== null)}
+        onPlay={() => setScreen('race')}
+        account={account}
+        onAccountChange={setAccount}
+      />
+    );
+  }
+
   return (
     <div className="stage">
       <div
@@ -215,7 +227,6 @@ export default function App() {
               <Cars players={state.players} poses={poses} mover={mover} />
             </TrackMap>
             {follow && <MiniMap players={state.players} poses={poses} view={view} />}
-            <PitWallChat account={account} onSignIn={() => setAuthOpen(true)} />
             <button type="button" className="cam-toggle cam-toggle--music" onClick={toggleMusic} aria-pressed={!musicOff}>
               {musicOff ? 'MUSIC OFF' : 'MUSIC ON'}
             </button>
@@ -233,10 +244,7 @@ export default function App() {
             onRoll={onRoll}
             onBox={onBox}
             onOvertake={onOvertake}
-            account={account}
-            onAccountChange={setAccount}
-            authOpen={authOpen}
-            setAuthOpen={setAuthOpen}
+            onHome={() => setScreen('home')}
           />
           {request && <TyrePicker request={request} player={state.players[request.id]} onChoose={onChooseTyre} />}
         </div>

@@ -1,0 +1,85 @@
+import { useState } from 'react';
+import { type Account, signOut } from '../account';
+import { TOTAL_LAPS } from '../game/board';
+import { MAP_VIEWBOX, TRACK_PATH } from '../game/track';
+import { type AuthMode, AuthDialog } from './Account';
+import { PitWallChat } from './PitWallChat';
+
+/** The first screen: start (or resume) the race, sign in, and the Pit Wall for suggesting changes. */
+export function Home({
+  accent,
+  raceStarted,
+  onPlay,
+  account,
+  onAccountChange,
+}: {
+  accent: string;
+  /** A race is under way, so the play button resumes it. */
+  raceStarted: boolean;
+  onPlay: () => void;
+  /** The signed-in player (null: signed out; undefined: still checking). */
+  account: Account | null | undefined;
+  onAccountChange: (a: Account | null) => void;
+}) {
+  const [auth, setAuth] = useState<AuthMode | null>(null);
+  const [pitWallOpen, setPitWallOpen] = useState(false);
+  const { x, y, w, h } = MAP_VIEWBOX;
+
+  return (
+    <main className="home" style={{ ['--accent' as string]: accent }}>
+      <section className="home__card" aria-labelledby="home-title">
+        <svg className="home__track" viewBox={`${x} ${y} ${w} ${h}`} aria-hidden="true">
+          <path d={TRACK_PATH} />
+        </svg>
+        <span className="eyebrow" style={{ color: accent }}>
+          ROUND 1 · ALBERT PARK
+        </span>
+        <h1 id="home-title" className="home__title">
+          Pitwall
+        </h1>
+        <p className="home__sub">Australian Grand Prix · {TOTAL_LAPS} laps · 3 tyre compounds · 1 mandatory stop</p>
+
+        <button type="button" className="home__play" onClick={onPlay}>
+          {raceStarted ? 'RESUME RACE' : 'START RACE'}
+        </button>
+        <button type="button" className="home__btn" onClick={() => setPitWallOpen(true)} aria-expanded={pitWallOpen}>
+          PIT WALL · SUGGEST A CHANGE
+        </button>
+
+        {account === undefined ? null : account ? (
+          <div className="home__account">
+            <span>
+              Signed in as <strong title={account.email}>{account.name}</strong>
+            </span>
+            <button type="button" className="account__btn" onClick={() => signOut().finally(() => onAccountChange(null))}>
+              Sign out
+            </button>
+          </div>
+        ) : (
+          <div className="home__account">
+            <button type="button" className="account__btn account__btn--primary" onClick={() => setAuth('signin')}>
+              Sign in
+            </button>
+            <button type="button" className="account__btn" onClick={() => setAuth('signup')}>
+              Create account
+            </button>
+          </div>
+        )}
+      </section>
+
+      {pitWallOpen && (
+        <PitWallChat account={account} onSignIn={() => setAuth('signin')} onClose={() => setPitWallOpen(false)} />
+      )}
+      {auth && (
+        <AuthDialog
+          initialMode={auth}
+          onClose={() => setAuth(null)}
+          onDone={(a) => {
+            setAuth(null);
+            onAccountChange(a);
+          }}
+        />
+      )}
+    </main>
+  );
+}
