@@ -527,3 +527,106 @@ button { font: inherit; }
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }
 }
+
+/* ---------- player account ---------- */
+
+.panel__topline { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 30px; }
+.account { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.account__name {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 700;
+}
+.account__btn {
+  padding: 5px 10px;
+  border: 1.5px solid var(--muted-dark);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--paper);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.account__btn:hover { border-color: var(--paper); }
+.account__btn--primary { border-color: var(--paper); }
+.account__btn:focus-visible { outline: 3px solid var(--paper); outline-offset: 2px; }
+
+/* Fixed inside the scaled artboard, so it covers the whole game. */
+.auth-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 9, 12, 0.72);
+}
+.auth {
+  position: relative;
+  width: 420px;
+  padding: 28px;
+  border-radius: 16px;
+  background: var(--ink);
+  color: var(--paper);
+  box-shadow: 0 0 0 1px var(--panel-edge), 0 30px 80px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  animation: caption-in 200ms ease-out;
+}
+.auth__title { margin: 0; font: 800 30px var(--display); text-transform: uppercase; }
+.auth__lead { margin: 0; font-size: 14px; color: var(--muted-dark); }
+.auth__field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; }
+.auth__field input {
+  height: 42px;
+  padding: 0 12px;
+  border: 1.5px solid var(--panel-edge);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--paper);
+  font: 500 15px 'Barlow', sans-serif;
+}
+.auth__field input:focus { outline: none; border-color: var(--paper); }
+.auth__field small { font-weight: 500; color: var(--muted-dark); }
+.auth__error { margin: 0; padding: 8px 12px; border-radius: 8px; background: #f8dedb; color: #8f1a14; font-size: 13px; font-weight: 600; }
+.auth__submit {
+  height: 48px;
+  border: none;
+  border-radius: 12px;
+  background: var(--accent, #d7261e);
+  color: #fff;
+  font: 800 19px var(--display);
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+.auth__submit:disabled { opacity: 0.6; cursor: default; }
+.auth__switch {
+  border: none;
+  background: none;
+  color: var(--muted-dark);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.auth__close {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted-dark);
+  font-size: 22px;
+  cursor: pointer;
+}
+.auth__close:hover { color: var(--paper); }
+.auth__submit:focus-visible,
+.auth__switch:focus-visible,
+.auth__close:focus-visible { outline: 3px solid var(--paper); outline-offset: 2px; }

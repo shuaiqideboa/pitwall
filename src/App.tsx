@@ -6,6 +6,7 @@ import { DIE_ROLL_MS } from './components/Die3D';
 import { type CarAnim, type CarPos, Cars, useCarPoses } from './components/Cars';
 import { FOLLOW_ZOOM, LOOK_AHEAD, useCamera } from './components/camera';
 import { MiniMap } from './components/MiniMap';
+import { useAccount } from './account';
 import { type Cue, cueLog, isMuted, playCue, setMuted } from './audio';
 import { TOTAL_LAPS, TRACK_LENGTH } from './game/board';
 import { GAME_CONFIG } from './game/config';
@@ -99,6 +100,7 @@ export default function App() {
   const [caption, setCaption] = useState<string | null>(null);
   const [anim, setAnim] = useState<CarAnim | null>(null);
   const [follow, setFollow] = useState(true);
+  const [account, setAccount] = useAccount();
   const busy = useRef(false);
   const driveCount = useRef(0);
 
@@ -228,6 +230,8 @@ export default function App() {
             onRoll={onRoll}
             onBox={onBox}
             onOvertake={onOvertake}
+            account={account}
+            onAccountChange={setAccount}
           />
           {request && <TyrePicker request={request} player={state.players[request.id]} onChoose={onChooseTyre} />}
         </div>
