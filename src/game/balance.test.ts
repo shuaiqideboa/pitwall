@@ -67,6 +67,7 @@ function simulate(): Results {
     const plans = Array.from({ length: 4 }, () => TYRE_PLANS[Math.floor(rand() * TYRE_PLANS.length)]);
     const styles = Array.from({ length: 4 }, () => OVERTAKE_STYLES[Math.floor(rand() * OVERTAKE_STYLES.length)]);
     plans.forEach((p) => add(r.plays, p.name));
+    plans.forEach((_, seat) => add(r.plays, `seat ${seat + 1}`));
     styles.forEach((s) => add(r.plays, `overtake: ${s}`));
 
     let st: GameState = newGame();
@@ -99,6 +100,7 @@ function simulate(): Results {
     if (st.players[st.winner].stops === 0) r.winnersWithoutStop++;
     add(r.wins, plans[st.winner].name);
     add(r.wins, `overtake: ${styles[st.winner]}`);
+    add(r.wins, `seat ${st.winner + 1}`);
   }
   return r;
 }
@@ -130,6 +132,11 @@ describe(`balance over ${GAMES} simulated races`, () => {
   it.each(TYRE_PLANS.map((p) => p.name))('tyre plan "%s" stays a contender (10–50% wins)', (name) => {
     expect(winRate(name)).toBeGreaterThan(0.1);
     expect(winRate(name)).toBeLessThan(0.5);
+  });
+
+  it.each([1, 2, 3, 4])('seat %i has a fair chance (15–35% wins)', (seat) => {
+    expect(winRate(`seat ${seat}`)).toBeGreaterThan(0.15);
+    expect(winRate(`seat ${seat}`)).toBeLessThan(0.35);
   });
 
   it('going for overtakes pays off, but not overwhelmingly', () => {

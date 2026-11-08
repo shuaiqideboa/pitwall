@@ -8,6 +8,8 @@ developers can review and ship.
 ## The game
 
 - 4 players, 5 laps, one 3D die per turn.
+- **Start:** at lights out every player rolls at once and the whole field gets
+  away together; the car that got away slowest makes the first move.
 - **Tyres:** Soft / Medium / Hard. Each compound has its own die; Softs and
   Mediums wear out. Every car must pit at least once.
 - **Pit lane:** call BOX, take the pit entry, crawl through under the speed
