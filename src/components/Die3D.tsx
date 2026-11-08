@@ -1,4 +1,5 @@
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
+import { GAME_CONFIG } from '../game/config';
 
 // Cube sides in face-index order (0–5), and the cube rotation that brings
 // each side to the front.
@@ -13,7 +14,7 @@ const FRONT_ROTATION: { x: number; y: number }[] = [
   { x: 90, y: 0 },
 ];
 
-export const DIE_ROLL_MS = 1400;
+export const DIE_ROLL_MS = GAME_CONFIG.pacing.dieRollMs;
 
 /** Smallest angle ≥ `from + minTurns·360` that is congruent to `target` mod 360. */
 function spinTo(from: number, target: number, minTurns: number) {

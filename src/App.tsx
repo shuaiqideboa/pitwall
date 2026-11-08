@@ -8,6 +8,7 @@ import { FOLLOW_ZOOM, LOOK_AHEAD, useCamera } from './components/camera';
 import { MiniMap } from './components/MiniMap';
 import { type Cue, cueLog, isMuted, playCue, setMuted } from './audio';
 import { TOTAL_LAPS, TRACK_LENGTH } from './game/board';
+import { GAME_CONFIG } from './game/config';
 import { type GameState, type Hop, chooseTyre, decideOvertake, lapOf, newGame, takeTurn, toggleBox } from './game/engine';
 import type { Compound } from './game/tyres';
 
@@ -18,15 +19,9 @@ const DESIGN_H = 860;
 // Theme accent from the design's `accent` tweak (options: #D7261E, #E8742A, #1E9E8F, #3366D6).
 const ACCENT = '#D7261E';
 
-// Pacing: slow enough that everyone at the table can follow each move.
-const SETTLE_MS = 600;
-/** Driving time per tile; a whole move is one continuous drive. */
-const HOP_MS = 380;
-/** The pit lane is speed limited, so cars visibly crawl through it. */
-const PIT_HOP_MS = 850;
-const MIN_DRIVE_MS = 600;
-const SEGMENT_PAUSE_MS = 900;
-const END_PAUSE_MS = 700;
+// Pacing (see GAME_CONFIG.pacing): slow enough that everyone at the table can follow each move.
+const { settleMs: SETTLE_MS, hopMs: HOP_MS, pitHopMs: PIT_HOP_MS, minDriveMs: MIN_DRIVE_MS } = GAME_CONFIG.pacing;
+const { segmentPauseMs: SEGMENT_PAUSE_MS, endPauseMs: END_PAUSE_MS } = GAME_CONFIG.pacing;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

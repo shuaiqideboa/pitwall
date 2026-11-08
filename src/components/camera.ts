@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { GAME_CONFIG } from '../game/config';
 import { MAP_VIEWBOX, type Point } from '../game/track';
 
 /** A window onto the map, in map units (an SVG viewBox). */
@@ -10,11 +11,11 @@ export interface View {
 }
 
 /** How far the follow camera zooms in on the car. */
-export const FOLLOW_ZOOM = 2.4;
+export const FOLLOW_ZOOM = GAME_CONFIG.camera.followZoom;
 /** How far ahead of the car (map units, along its heading) the camera looks. */
-export const LOOK_AHEAD = 55;
+export const LOOK_AHEAD = GAME_CONFIG.camera.lookAhead;
 /** Camera smoothing: about 63% of the way to the target every this many ms. */
-const SMOOTHING_MS = 220;
+const SMOOTHING_MS = GAME_CONFIG.camera.smoothingMs;
 
 const MAP_CENTER = { x: MAP_VIEWBOX.x + MAP_VIEWBOX.w / 2, y: MAP_VIEWBOX.y + MAP_VIEWBOX.h / 2 };
 
