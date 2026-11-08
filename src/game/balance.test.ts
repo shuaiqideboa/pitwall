@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { TOTAL_LAPS } from './board';
 import { type Compound } from './config';
-import { type GameState, type Player, chooseTyre, decideOvertake, lapOf, newGame, takeTurn, toggleBox } from './engine';
+import { type GameState, type Player, chooseTyre, decideOvertake, lapOf, lightsOut, newGame, takeTurn, toggleBox } from './engine';
 import { TYRES, tyreLaps } from './tyres';
 
 // Plays thousands of seeded races between scripted strategies and checks the
@@ -77,6 +77,10 @@ function simulate(): Results {
         const req = st.tyreQueue[0];
         const plan = plans[req.id];
         st = chooseTyre(st, req.reason === 'grid' ? plan.start : req.reason === 'red-flag' ? null : plan.next);
+        continue;
+      }
+      if (st.stage === 'grid') {
+        st = lightsOut(st);
         continue;
       }
       if (st.overtake) {

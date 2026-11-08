@@ -191,7 +191,7 @@ export function CenterPanel({
             className="roll-btn"
             style={{ background: accent }}
             onClick={onRoll}
-            disabled={!(canAct || (phase === 'idle' && state.stage === 'finished')) || state.stage === 'grid'}
+            disabled={!(canAct || (phase === 'idle' && state.stage === 'finished'))}
           >
             {phase === 'rolling'
               ? 'ROLLING…'
@@ -199,7 +199,9 @@ export function CenterPanel({
                 ? 'DRIVING…'
                 : state.stage === 'finished'
                   ? 'NEW RACE'
-                  : 'ROLL'}
+                  : state.stage === 'grid'
+                    ? 'LIGHTS OUT'
+                    : 'ROLL'}
           </button>
           <button
             type="button"

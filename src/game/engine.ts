@@ -214,8 +214,8 @@ export function chooseTyre(state: GameState, compound: Compound | null): GameSta
   const tyre = compound ? `${TYRES[compound].name}s` : 'the same tyres';
 
   if (request.reason === 'grid') {
-    if (rest.length > 0) return { ...state, players, tyreQueue: rest, log: `${p.name} starts on ${tyre}.` };
-    return launch({ ...state, players, tyreQueue: rest });
+    const ready = rest.length === 0 ? ' All cars on the grid: lights out when everyone is ready.' : '';
+    return { ...state, players, tyreQueue: rest, log: `${p.name} starts on ${tyre}.${ready}` };
   }
 
   // A pit stop always counts; under a red flag only an actual change does.
@@ -226,12 +226,14 @@ export function chooseTyre(state: GameState, compound: Compound | null): GameSta
 }
 
 /**
- * Lights out: every player rolls at once and all cars get away together, so
+ * Lights out, once every car has its starting tyres and the players are
+ * ready: every player rolls at once and all cars get away together, so
  * nobody gains from moving first off the grid. Cars can share a block. The
  * car that got away slowest (a random one of them, if tied) makes the first
  * move; play then carries on in seat order.
  */
-function launch(state: GameState): GameState {
+export function lightsOut(state: GameState): GameState {
+  if (state.stage !== 'grid' || state.tyreQueue.length > 0) return state;
   const players = state.players.map((p) => ({ ...p }));
   const trace: Hop[] = [];
   const rolls = players.map((p) => dieFaces(p)[rollFace()]);

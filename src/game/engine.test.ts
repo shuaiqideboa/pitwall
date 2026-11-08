@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PIT_BOX_INDEX, PIT_ENTRY_INDEX, TOTAL_LAPS, TRACK_LENGTH } from './board';
 import { GAME_CONFIG } from './config';
-import { type GameState, chooseTyre, decideOvertake, newGame, takeTurn, toggleBox } from './engine';
+import { type GameState, chooseTyre, decideOvertake, lightsOut, newGame, takeTurn, toggleBox } from './engine';
 
 // Everyone on Hards: faces [3, 3, 4, 4, 5, 5], so face index 4 rolls a 5.
 const ROLL_5 = 4;
@@ -11,6 +11,7 @@ const ROLL_3 = 0;
 function race(progress: number[], current = 0, patch: Partial<GameState> = {}): GameState {
   let st = newGame();
   while (st.tyreQueue.length) st = chooseTyre(st, 'hard');
+  st = lightsOut(st);
   return {
     ...st,
     ...patch,
@@ -28,20 +29,25 @@ const randomReturns = (...values: number[]) => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('starting a race', () => {
-  it('asks every player for tyres, then the lights go out', () => {
+  it('asks every player for tyres, then waits on the grid until the lights go out', () => {
     let st = newGame();
     expect(st.stage).toBe('grid');
+    expect(lightsOut(st)).toBe(st); // not before everyone has tyres
     for (let i = 0; i < 4; i++) st = chooseTyre(st, 'medium');
-    expect(st.stage).toBe('race');
     expect(st.players.every((p) => p.tyre === 'medium')).toBe(true);
+    expect(st.stage).toBe('grid');
+    expect(st.players.every((p) => p.progress === 0)).toBe(true);
+    expect(takeTurn(st)).toBe(st); // nobody can roll yet
+    st = lightsOut(st);
+    expect(st.stage).toBe('race');
   });
 
   it('at lights out every car rolls and gets away together; the slowest moves first', () => {
     let st = newGame();
-    for (let i = 0; i < 3; i++) st = chooseTyre(st, 'hard');
+    for (let i = 0; i < 4; i++) st = chooseTyre(st, 'hard');
     // Hards: faces [3, 3, 4, 4, 5, 5]. Rolls 5, 4, 3, 3; the tie for slowest goes to the later of the two.
     randomReturns(0.9, 0.5, 0.1, 0.1, 0.99);
-    st = chooseTyre(st, 'hard');
+    st = lightsOut(st);
     expect(st.players.map((p) => p.progress)).toEqual([5, 4, 3, 3]);
     expect(st.current).toBe(3);
     expect(st.overtake).toBeNull();

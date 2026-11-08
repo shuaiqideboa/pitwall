@@ -11,7 +11,7 @@ import { useAccount } from './account';
 import { type Cue, cueLog, isMuted, playCue, setMuted } from './audio';
 import { TOTAL_LAPS, TRACK_LENGTH } from './game/board';
 import { GAME_CONFIG } from './game/config';
-import { type GameState, type Hop, chooseTyre, decideOvertake, lapOf, newGame, takeTurn, toggleBox } from './game/engine';
+import { type GameState, type Hop, chooseTyre, decideOvertake, lapOf, lightsOut, newGame, takeTurn, toggleBox } from './game/engine';
 import type { Compound } from './game/tyres';
 
 // Design size. The board stretches to the window's shape, and everything is
@@ -149,6 +149,13 @@ export default function App() {
       return;
     }
     busy.current = true;
+    if (state.stage === 'grid') {
+      // Everyone is ready: lights out, and the whole field gets away together.
+      playCue('lights-out');
+      await play(state, lightsOut(state));
+      busy.current = false;
+      return;
+    }
     const next = takeTurn(state);
 
     // The 3D die spins toward the rolled face, so the result is set up front.
@@ -170,19 +177,9 @@ export default function App() {
   };
 
   const onBox = () => setState((s) => toggleBox(s));
-  const onChooseTyre = async (c: Compound | null) => {
-    if (busy.current) return;
-    const [request, ...rest] = state.tyreQueue;
-    if (request?.reason === 'pit-stop') playCue('pit-stop');
-    if (request?.reason !== 'grid' || rest.length > 0) {
-      setState((s) => chooseTyre(s, c));
-      return;
-    }
-    // The last starting tyre: lights out, and the whole field gets away together.
-    playCue('lights-out');
-    busy.current = true;
-    await play(state, chooseTyre(state, c));
-    busy.current = false;
+  const onChooseTyre = (c: Compound | null) => {
+    if (state.tyreQueue[0]?.reason === 'pit-stop') playCue('pit-stop');
+    setState((s) => chooseTyre(s, c));
   };
   const [musicOff, setMusicOff] = useState(isMuted);
   const toggleMusic = () => {
