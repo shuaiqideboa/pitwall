@@ -4,3 +4,6 @@ dist
 .DS_Store
 # Local editor / assistant settings
 .claude/
+dist-server
+# Local embedded database
+.data/

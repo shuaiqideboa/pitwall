@@ -21,10 +21,20 @@ developers can review and ship.
 
 ```bash
 npm install
-npm run dev
+npm run dev          # the game, with live reload
+npm run dev:server   # the account API (in a second terminal)
 ```
 
-Then open http://localhost:5173.
+Then open http://localhost:5173. Without the server the game still plays;
+you just can't sign in. Locally, accounts are kept in an embedded Postgres
+under `.data/` (not committed).
+
+To run it the way it's deployed (one server for the game and the API):
+
+```bash
+npm run build
+npm start            # http://localhost:8787; uses DATABASE_URL when set
+```
 
 ```bash
 npm test
@@ -52,6 +62,7 @@ outside it.
 | `src/game/track.ts` | Map geometry |
 | `src/components/` | Map, cars, camera, side panel, dice, tyre picker |
 | `src/audio.ts` | Music cues |
+| `server/` | Player accounts API (Hono + Postgres) and the production server |
 
 ## Roadmap
 

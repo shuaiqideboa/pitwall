@@ -2,6 +2,8 @@ import { SECTOR_COLORS, TOTAL_LAPS, TRACK_LENGTH } from '../game/board';
 import type { Phase } from '../App';
 import { type GameState, type Player, cleanChance, lapOf, mustBox, raceOrder } from '../game/engine';
 import { TYRES, dieFaces, isWorn, tyreLaps } from '../game/tyres';
+import type { Account } from '../account';
+import { AccountChip } from './Account';
 import { Die3D } from './Die3D';
 import { TyreIcon } from './Tyres';
 
@@ -18,6 +20,9 @@ interface CenterPanelProps {
   onRoll: () => void;
   onBox: () => void;
   onOvertake: (go: boolean) => void;
+  /** The signed-in player (null: signed out; undefined: still checking). */
+  account: Account | null | undefined;
+  onAccountChange: (a: Account | null) => void;
 }
 
 function StatusTag({ p }: { p: Player }) {
@@ -48,7 +53,19 @@ const captionTone = (caption: string) =>
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
 /** The game's side panel: race order, die and controls, and the overtake call. */
-export function CenterPanel({ state, accent, phase, face, rollId, caption, onRoll, onBox, onOvertake }: CenterPanelProps) {
+export function CenterPanel({
+  state,
+  accent,
+  phase,
+  face,
+  rollId,
+  caption,
+  onRoll,
+  onBox,
+  onOvertake,
+  account,
+  onAccountChange,
+}: CenterPanelProps) {
   const me = state.players[state.current];
   const faces = dieFaces(me);
   const faceIndex = face ?? state.lastFace ?? 4;
@@ -76,9 +93,12 @@ export function CenterPanel({ state, accent, phase, face, rollId, caption, onRol
   return (
     <aside className="panel">
       <div className="panel__heading">
-        <span className="eyebrow" style={{ color: accent }}>
-          ROUND 1 · ALBERT PARK, MELBOURNE
-        </span>
+        <div className="panel__topline">
+          <span className="eyebrow" style={{ color: accent }}>
+            ROUND 1 · ALBERT PARK
+          </span>
+          <AccountChip account={account} onChange={onAccountChange} />
+        </div>
         <h1 className="panel__title">Australian Grand Prix</h1>
         <span className="panel__sub">5 laps · 3 tyre compounds · 1 mandatory stop</span>
       </div>
