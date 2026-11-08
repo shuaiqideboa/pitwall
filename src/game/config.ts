@@ -74,7 +74,7 @@ export const GAME_CONFIG: GameConfig = {
   pitLane: { speedLimit: 2, safetyCarSpeedLimit: 3 },
   overtaking: {
     cost: 2,
-    risk: { 'safety-car': 0.35, 'red-flag': 0.02 },
+    risk: { 'safety-car': 0.25, 'red-flag': 0.02 },
     drsRisk: { 'safety-car': 0.092, 'red-flag': 0.017 },
   },
   safetyCar: { speedLimit: 3, maxGap: 2 },
