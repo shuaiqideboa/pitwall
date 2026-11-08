@@ -137,6 +137,10 @@ export function PitWallChat({
                 {error}
               </p>
             )}
+            <p className="pitwall__public">
+              If our pit crew builds your idea, it appears on the Community page with your name, so other players can
+              vote for it. Ideas that aren't taken up stay private.
+            </p>
           </form>
 
           <h3 className="pitwall__subtitle">Your ideas</h3>

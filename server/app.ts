@@ -28,6 +28,23 @@ export const DAILY_REQUEST_LIMIT = 5;
 export const REQUEST_MIN = 10;
 export const REQUEST_MAX = 2000;
 
+/** How many recently merged ideas the community page shows. */
+export const COMMUNITY_LIVE_LIMIT = 20;
+
+/** An idea as the community page shows it: no emails, no pull request links. */
+export interface CommunityIdea {
+  id: number;
+  text: string;
+  status: string;
+  reply: string | null;
+  player: string;
+  votes: number;
+  voted: boolean;
+  mine: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PlayerRequest {
   id: number;
   text: string;
@@ -193,6 +210,55 @@ export function createApp(db: Db, { secureCookies, onRequest }: Options) {
       [user.id],
     );
     return c.json({ requests: rows });
+  });
+
+  // ---- community: ideas the agent has turned into a change, and votes ----
+
+  // Only ideas that became a proposed or merged change are public; declined,
+  // failed or unanswered ones never appear.
+  app.get('/api/community', async (c) => {
+    const user = await currentUser(getCookie(c, SESSION_COOKIE));
+    const { rows } = await db.query<CommunityIdea>(
+      `SELECT r.id, r.text, r.status, r.reply, r.created_at, r.updated_at, u.name AS player,
+              (SELECT count(*)::int FROM votes v WHERE v.request_id = r.id) AS votes,
+              EXISTS (SELECT 1 FROM votes v WHERE v.request_id = r.id AND v.user_id = $1) AS voted,
+              COALESCE(r.user_id = $1, false) AS mine
+       FROM requests r JOIN users u ON u.id = r.user_id
+       WHERE r.status IN ('pr_open', 'merged')
+       ORDER BY r.id`,
+      [user?.id ?? null],
+    );
+    const waiting = rows
+      .filter((r) => r.status === 'pr_open')
+      .sort((a, b) => b.votes - a.votes || a.id - b.id);
+    const live = rows
+      .filter((r) => r.status === 'merged')
+      .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
+      .slice(0, COMMUNITY_LIVE_LIMIT);
+    return c.json({ waiting, live, signedIn: Boolean(user) });
+  });
+
+  app.post('/api/community/:id/vote', async (c) => {
+    const user = await currentUser(getCookie(c, SESSION_COOKIE));
+    if (!user) return c.json({ error: 'Please sign in to vote.' }, 401);
+    const id = Number(c.req.param('id'));
+    const body = await readJson(c);
+    if (!Number.isInteger(id) || typeof body.vote !== 'boolean') return c.json({ error: 'Bad vote.' }, 400);
+    const { rows } = await db.query<{ user_id: number; status: string }>(
+      'SELECT user_id, status FROM requests WHERE id = $1',
+      [id],
+    );
+    const idea = rows[0];
+    if (!idea || !['pr_open', 'merged'].includes(idea.status)) return c.json({ error: 'Idea not found.' }, 404);
+    if (idea.status !== 'pr_open') return c.json({ error: 'Voting is only open while an idea waits for review.' }, 409);
+    if (idea.user_id === user.id) return c.json({ error: "You can't vote for your own idea." }, 403);
+    if (body.vote) {
+      await db.query('INSERT INTO votes (request_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [id, user.id]);
+    } else {
+      await db.query('DELETE FROM votes WHERE request_id = $1 AND user_id = $2', [id, user.id]);
+    }
+    const { rows: count } = await db.query<{ n: number }>('SELECT count(*)::int AS n FROM votes WHERE request_id = $1', [id]);
+    return c.json({ votes: count[0].n, voted: body.vote });
   });
 
   app.notFound((c) => (c.req.path.startsWith('/api/') ? c.json({ error: 'Not found.' }, 404) : c.text('Not found', 404)));
