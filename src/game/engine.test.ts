@@ -35,6 +35,18 @@ describe('starting a race', () => {
     expect(st.stage).toBe('race');
     expect(st.players.every((p) => p.tyre === 'medium')).toBe(true);
   });
+
+  it('at lights out every car rolls and gets away together; the slowest moves first', () => {
+    let st = newGame();
+    for (let i = 0; i < 3; i++) st = chooseTyre(st, 'hard');
+    // Hards: faces [3, 3, 4, 4, 5, 5]. Rolls 5, 4, 3, 3; the tie for slowest goes to the later of the two.
+    randomReturns(0.9, 0.5, 0.1, 0.1, 0.99);
+    st = chooseTyre(st, 'hard');
+    expect(st.players.map((p) => p.progress)).toEqual([5, 4, 3, 3]);
+    expect(st.current).toBe(3);
+    expect(st.overtake).toBeNull();
+    expect(st.trace).toHaveLength(15);
+  });
 });
 
 describe('overtaking', () => {

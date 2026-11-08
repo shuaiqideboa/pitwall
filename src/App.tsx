@@ -170,11 +170,19 @@ export default function App() {
   };
 
   const onBox = () => setState((s) => toggleBox(s));
-  const onChooseTyre = (c: Compound | null) => {
+  const onChooseTyre = async (c: Compound | null) => {
+    if (busy.current) return;
     const [request, ...rest] = state.tyreQueue;
     if (request?.reason === 'pit-stop') playCue('pit-stop');
-    if (request?.reason === 'grid' && rest.length === 0) playCue('lights-out');
-    setState((s) => chooseTyre(s, c));
+    if (request?.reason !== 'grid' || rest.length > 0) {
+      setState((s) => chooseTyre(s, c));
+      return;
+    }
+    // The last starting tyre: lights out, and the whole field gets away together.
+    playCue('lights-out');
+    busy.current = true;
+    await play(state, chooseTyre(state, c));
+    busy.current = false;
   };
   const [musicOff, setMusicOff] = useState(isMuted);
   const toggleMusic = () => {

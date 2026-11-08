@@ -214,14 +214,8 @@ export function chooseTyre(state: GameState, compound: Compound | null): GameSta
   const tyre = compound ? `${TYRES[compound].name}s` : 'the same tyres';
 
   if (request.reason === 'grid') {
-    const started = rest.length === 0;
-    return {
-      ...state,
-      players,
-      tyreQueue: rest,
-      stage: started ? 'race' : 'grid',
-      log: started ? `Lights out! ${players[state.current].name} to move.` : `${p.name} starts on ${tyre}.`,
-    };
+    if (rest.length > 0) return { ...state, players, tyreQueue: rest, log: `${p.name} starts on ${tyre}.` };
+    return launch({ ...state, players, tyreQueue: rest });
   }
 
   // A pit stop always counts; under a red flag only an actual change does.
@@ -229,6 +223,38 @@ export function chooseTyre(state: GameState, compound: Compound | null): GameSta
   const log = request.reason === 'pit-stop' ? `${p.name} fits ${tyre}.` : `${p.name} restarts on ${tyre}.`;
   const resumed = rest.length === 0 ? ` ${players[state.current].name} to move.` : '';
   return { ...state, players, tyreQueue: rest, log: log + resumed };
+}
+
+/**
+ * Lights out: every player rolls at once and all cars get away together, so
+ * nobody gains from moving first off the grid. Cars can share a block. The
+ * car that got away slowest (a random one of them, if tied) makes the first
+ * move; play then carries on in seat order.
+ */
+function launch(state: GameState): GameState {
+  const players = state.players.map((p) => ({ ...p }));
+  const trace: Hop[] = [];
+  const rolls = players.map((p) => dieFaces(p)[rollFace()]);
+  const label = `LIGHTS OUT! ${players.map((p, i) => `${p.name} rolls ${rolls[i]}`).join(' · ')}`;
+  players.forEach((p, i) => {
+    for (let step = 0; step < rolls[i]; step++) {
+      p.progress += 1;
+      trace.push({ id: p.id, progress: p.progress, pit: false, pause: step === 0, label: i === 0 && step === 0 ? label : undefined });
+    }
+  });
+  const slowest = Math.min(...rolls);
+  const tied = players.filter((_, i) => rolls[i] === slowest);
+  const first = tied[Math.floor(Math.random() * tied.length)];
+  return {
+    ...state,
+    players,
+    stage: 'race',
+    current: first.id,
+    lastRoll: null,
+    lastFace: null,
+    trace,
+    log: `Lights out! ${first.name} got away slowest, so moves first.`,
+  };
 }
 
 /** Roll and drive. The move may stop behind another car and ask for an overtake decision. */
