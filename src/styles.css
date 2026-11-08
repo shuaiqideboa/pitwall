@@ -552,7 +552,9 @@ button { font: inherit; }
   display: flex;
   flex-direction: column;
   gap: 14px;
-  overflow: hidden;
+  /* clip, not hidden: the track drawing pokes past the edge, and a hidden
+     overflow can still be scrolled (e.g. when focus moves), shifting the card. */
+  overflow: clip;
   isolation: isolate;
 }
 .home__track { position: absolute; top: 18px; right: -40px; z-index: -1; width: 240px; pointer-events: none; }
