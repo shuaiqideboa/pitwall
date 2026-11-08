@@ -26,10 +26,26 @@ npm run dev
 
 Then open http://localhost:5173.
 
+```bash
+npm test
+```
+
+runs the rule tests and a 3,000-race balance simulation. It fails if a change
+makes races unfinishable or one strategy dominant.
+
+## Tuning the game
+
+Every number that shapes the race (laps, tyre dice and wear, pit limiter,
+overtake odds, Safety Car, pacing, camera) is in `src/game/config.ts`, with
+the allowed range for each setting in `CONFIG_RULES`. This file is the menu
+the AI will be allowed to change, and `validateConfig()` rejects anything
+outside it.
+
 ## Where things live
 
 | Path | What |
 | --- | --- |
+| `src/game/config.ts` | **All tunable settings** and their allowed ranges |
 | `src/game/engine.ts` | Rules: turns, overtakes, pit lane, Safety Car, red flag |
 | `src/game/tyres.ts` | Tyre compounds and their dice |
 | `src/game/board.ts` | Track blocks, DRS zones, pit lane |
@@ -39,7 +55,8 @@ Then open http://localhost:5173.
 
 ## Roadmap
 
-1. **Foundation:** this repo, CI, all game settings in one config file.
+1. **Foundation (done):** this repo, CI, all game settings in one config file,
+   rule and balance tests.
 2. **Capture feedback:** an in-game "Suggest a change" button that files a
    GitHub issue with the race context.
 3. **Instant tweaks:** an AI adjusts allowed settings for that player, with

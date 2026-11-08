@@ -32,7 +32,7 @@ function tyreSummary(p: Player) {
   if (!p.tyre) return '';
   const spec = TYRES[p.tyre];
   if (isWorn(p)) return 'WORN, box soon';
-  if (!spec.wornFaces) return 'never wear';
+  if (spec.lifeLaps === null) return 'never wear';
   return `${Math.max(0, spec.lifeLaps - tyreLaps(p)).toFixed(1)} laps left`;
 }
 

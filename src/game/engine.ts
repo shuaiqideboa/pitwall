@@ -9,7 +9,10 @@ import {
   TRACK_LENGTH,
   type Tile,
 } from './board';
+import { GAME_CONFIG, type IncidentKind, type Risk } from './config';
 import { type Compound, TYRES, type TyreState, dieFaces } from './tyres';
+
+export type { IncidentKind, Risk };
 
 export interface Player extends TyreState {
   id: number;
@@ -45,9 +48,6 @@ export interface Hop {
   label?: string;
 }
 
-export type IncidentKind = 'safety-car' | 'red-flag';
-/** Chance of each incident when attempting an overtake; the rest is a clean pass. */
-export type Risk = Record<IncidentKind, number>;
 
 export interface Incident {
   kind: IncidentKind;
@@ -112,21 +112,21 @@ export const PLAYER_SETUP: Pick<Player, 'name' | 'color' | 'ink'>[] = [
 ];
 
 /** Behind the Safety Car every car moves at most this many blocks a turn. */
-export const SC_SPEED_LIMIT = 3;
+export const SC_SPEED_LIMIT = GAME_CONFIG.safetyCar.speedLimit;
 /** When the Safety Car comes out the field closes up to at most this gap (blocks). */
-export const SC_MAX_GAP = 2;
+export const SC_MAX_GAP = GAME_CONFIG.safetyCar.maxGap;
 /**
  * Pitting under the Safety Car is cheap, as in real F1: the pit limiter is
  * raised and the crew is ready, so the tyre change doesn't end the move.
  */
-export const SC_PIT_SPEED_LIMIT = 3;
+export const SC_PIT_SPEED_LIMIT = GAME_CONFIG.pitLane.safetyCarSpeedLimit;
 
-/** Risk of an overtake attempt anywhere but a DRS zone (63% clean). */
-export const OVERTAKE_RISK: Risk = { 'safety-car': 0.35, 'red-flag': 0.02 };
-/** Risk of an overtake attempt into a DRS zone (89% clean). */
-export const DRS_RISK: Risk = { 'safety-car': 0.092, 'red-flag': 0.017 };
+/** Risk of an overtake attempt anywhere but a DRS zone. */
+export const OVERTAKE_RISK: Risk = GAME_CONFIG.overtaking.risk;
+/** Risk of an overtake attempt into a DRS zone. */
+export const DRS_RISK: Risk = GAME_CONFIG.overtaking.drsRisk;
 /** Passing takes this many blocks of the roll: onto the rival's block and past it. */
-export const OVERTAKE_COST = 2;
+export const OVERTAKE_COST = GAME_CONFIG.overtaking.cost;
 
 export const cleanChance = (risk: Risk) => 1 - risk['safety-car'] - risk['red-flag'];
 

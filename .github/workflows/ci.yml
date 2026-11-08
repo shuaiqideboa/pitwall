@@ -17,3 +17,5 @@ jobs:
       - run: npm ci
       - name: Typecheck and build
         run: npm run build
+      - name: Rules and balance tests
+        run: npm test

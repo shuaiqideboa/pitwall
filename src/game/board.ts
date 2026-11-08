@@ -1,3 +1,5 @@
+import { GAME_CONFIG } from './config';
+
 // Round 1 · Albert Park. The lap is split into blocks that run clockwise
 // from the Start/Finish line; where each block sits on the map is in track.ts.
 
@@ -49,7 +51,7 @@ export const TILES: Tile[] = [
 ];
 
 export const TRACK_LENGTH = TILES.length;
-export const TOTAL_LAPS = 5;
+export const TOTAL_LAPS = GAME_CONFIG.race.laps;
 
 /** Where cars stop to change tyres. */
 export const PIT_BOX_INDEX = 2;
@@ -68,4 +70,4 @@ export const PIT_TILES: Tile[] = [0, 1, 2, 3].map((k) => ({
 export const PIT_ENTRY_INDEX = TRACK_LENGTH - 1;
 export const PIT_LENGTH = PIT_TILES.length;
 /** Pit lane speed limiter: most boxes a car can cover in one turn. */
-export const PIT_SPEED_LIMIT = 2;
+export const PIT_SPEED_LIMIT = GAME_CONFIG.pitLane.speedLimit;
