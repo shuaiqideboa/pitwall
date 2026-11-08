@@ -6,6 +6,7 @@ import { DIE_ROLL_MS } from './components/Die3D';
 import { type CarAnim, type CarPos, Cars, useCarPoses } from './components/Cars';
 import { FOLLOW_ZOOM, LOOK_AHEAD, useCamera } from './components/camera';
 import { MiniMap } from './components/MiniMap';
+import { PitWallChat } from './components/PitWallChat';
 import { useAccount } from './account';
 import { type Cue, cueLog, isMuted, playCue, setMuted } from './audio';
 import { TOTAL_LAPS, TRACK_LENGTH } from './game/board';
@@ -101,6 +102,7 @@ export default function App() {
   const [anim, setAnim] = useState<CarAnim | null>(null);
   const [follow, setFollow] = useState(true);
   const [account, setAccount] = useAccount();
+  const [authOpen, setAuthOpen] = useState(false);
   const busy = useRef(false);
   const driveCount = useRef(0);
 
@@ -213,6 +215,7 @@ export default function App() {
               <Cars players={state.players} poses={poses} mover={mover} />
             </TrackMap>
             {follow && <MiniMap players={state.players} poses={poses} view={view} />}
+            <PitWallChat account={account} onSignIn={() => setAuthOpen(true)} />
             <button type="button" className="cam-toggle cam-toggle--music" onClick={toggleMusic} aria-pressed={!musicOff}>
               {musicOff ? 'MUSIC OFF' : 'MUSIC ON'}
             </button>
@@ -232,6 +235,8 @@ export default function App() {
             onOvertake={onOvertake}
             account={account}
             onAccountChange={setAccount}
+            authOpen={authOpen}
+            setAuthOpen={setAuthOpen}
           />
           {request && <TyrePicker request={request} player={state.players[request.id]} onChoose={onChooseTyre} />}
         </div>

@@ -19,6 +19,23 @@ export interface User {
 interface Options {
   /** Send cookies only over HTTPS (on in production). */
   secureCookies: boolean;
+  /** Called when a player submits a request, so the agent can start on it right away. */
+  onRequest?: () => void;
+}
+
+/** Requests a player may send per day (keeps one player from using up the agent). */
+export const DAILY_REQUEST_LIMIT = 5;
+export const REQUEST_MIN = 10;
+export const REQUEST_MAX = 2000;
+
+export interface PlayerRequest {
+  id: number;
+  text: string;
+  status: string;
+  reply: string | null;
+  pr_url: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -48,7 +65,7 @@ function validate(body: Record<string, unknown>, needName: boolean): string | nu
 }
 
 /** The HTTP API. Everything lives under /api; the game's files are served separately. */
-export function createApp(db: Db, { secureCookies }: Options) {
+export function createApp(db: Db, { secureCookies, onRequest }: Options) {
   const app = new Hono();
   const failedLogins = new Map<string, { count: number; since: number }>();
 
@@ -141,6 +158,42 @@ export function createApp(db: Db, { secureCookies }: Options) {
   });
 
   app.get('/api/me', async (c) => c.json({ user: await currentUser(getCookie(c, SESSION_COOKIE)) }));
+
+  // ---- requests to the Pit Wall agent (signed-in players only) ----
+
+  app.post('/api/requests', async (c) => {
+    const user = await currentUser(getCookie(c, SESSION_COOKIE));
+    if (!user) return c.json({ error: 'Please sign in to send a request.' }, 401);
+    const body = await readJson(c);
+    const text = typeof body.text === 'string' ? body.text.trim() : '';
+    if (text.length < REQUEST_MIN) return c.json({ error: `Please describe your idea in at least ${REQUEST_MIN} characters.` }, 400);
+    if (text.length > REQUEST_MAX) return c.json({ error: `Please keep it under ${REQUEST_MAX} characters.` }, 400);
+    const { rows: today } = await db.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM requests WHERE user_id = $1 AND created_at > now() - interval '1 day'`,
+      [user.id],
+    );
+    if (today[0].n >= DAILY_REQUEST_LIMIT) {
+      return c.json({ error: `You can send ${DAILY_REQUEST_LIMIT} requests a day. Please try again tomorrow.` }, 429);
+    }
+    const { rows } = await db.query<PlayerRequest>(
+      `INSERT INTO requests (user_id, text) VALUES ($1, $2)
+       RETURNING id, text, status, reply, pr_url, created_at, updated_at`,
+      [user.id, text],
+    );
+    onRequest?.();
+    return c.json({ request: rows[0] }, 201);
+  });
+
+  app.get('/api/requests', async (c) => {
+    const user = await currentUser(getCookie(c, SESSION_COOKIE));
+    if (!user) return c.json({ error: 'Please sign in.' }, 401);
+    const { rows } = await db.query<PlayerRequest>(
+      `SELECT id, text, status, reply, pr_url, created_at, updated_at FROM requests
+       WHERE user_id = $1 ORDER BY id DESC LIMIT 50`,
+      [user.id],
+    );
+    return c.json({ requests: rows });
+  });
 
   app.notFound((c) => (c.req.path.startsWith('/api/') ? c.json({ error: 'Not found.' }, 404) : c.text('Not found', 404)));
 
