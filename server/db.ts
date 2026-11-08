@@ -53,6 +53,13 @@ export async function migrate(db: Db) {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`);
   await db.query(`
+    CREATE TABLE IF NOT EXISTS votes (
+      request_id INTEGER NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (request_id, user_id) -- one vote per player per idea
+    )`);
+  await db.query(`
     CREATE TABLE IF NOT EXISTS agent_state (
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL

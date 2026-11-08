@@ -3,9 +3,10 @@ import { type Account, signOut } from '../account';
 import { TOTAL_LAPS } from '../game/board';
 import { MAP_VIEWBOX, TRACK_PATH } from '../game/track';
 import { type AuthMode, AuthDialog } from './Account';
+import { Community } from './Community';
 import { PitWallChat } from './PitWallChat';
 
-/** The first screen: start (or resume) the race, sign in, and the Pit Wall for suggesting changes. */
+/** The first screen: start (or resume) the race, sign in, the Pit Wall for suggesting changes, and the community. */
 export function Home({
   accent,
   raceStarted,
@@ -22,7 +23,7 @@ export function Home({
   onAccountChange: (a: Account | null) => void;
 }) {
   const [auth, setAuth] = useState<AuthMode | null>(null);
-  const [pitWallOpen, setPitWallOpen] = useState(false);
+  const [panel, setPanel] = useState<'pitwall' | 'community' | null>(null);
   const { x, y, w, h } = MAP_VIEWBOX;
 
   return (
@@ -42,8 +43,11 @@ export function Home({
         <button type="button" className="home__play" onClick={onPlay}>
           {raceStarted ? 'RESUME RACE' : 'START RACE'}
         </button>
-        <button type="button" className="home__btn" onClick={() => setPitWallOpen(true)} aria-expanded={pitWallOpen}>
+        <button type="button" className="home__btn" onClick={() => setPanel('pitwall')} aria-expanded={panel === 'pitwall'}>
           PIT WALL · SUGGEST A CHANGE
+        </button>
+        <button type="button" className="home__btn" onClick={() => setPanel('community')} aria-expanded={panel === 'community'}>
+          COMMUNITY · VOTE ON IDEAS
         </button>
 
         {account === undefined ? null : account ? (
@@ -67,8 +71,11 @@ export function Home({
         )}
       </section>
 
-      {pitWallOpen && (
-        <PitWallChat account={account} onSignIn={() => setAuth('signin')} onClose={() => setPitWallOpen(false)} />
+      {panel === 'pitwall' && (
+        <PitWallChat account={account} onSignIn={() => setAuth('signin')} onClose={() => setPanel(null)} />
+      )}
+      {panel === 'community' && (
+        <Community account={account} onSignIn={() => setAuth('signin')} onClose={() => setPanel(null)} />
       )}
       {auth && (
         <AuthDialog
