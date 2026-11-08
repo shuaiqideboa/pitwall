@@ -23,6 +23,8 @@ interface CenterPanelProps {
   /** The signed-in player (null: signed out; undefined: still checking). */
   account: Account | null | undefined;
   onAccountChange: (a: Account | null) => void;
+  authOpen: boolean;
+  setAuthOpen: (open: boolean) => void;
 }
 
 function StatusTag({ p }: { p: Player }) {
@@ -65,6 +67,8 @@ export function CenterPanel({
   onOvertake,
   account,
   onAccountChange,
+  authOpen,
+  setAuthOpen,
 }: CenterPanelProps) {
   const me = state.players[state.current];
   const faces = dieFaces(me);
@@ -97,7 +101,7 @@ export function CenterPanel({
           <span className="eyebrow" style={{ color: accent }}>
             ROUND 1 · ALBERT PARK
           </span>
-          <AccountChip account={account} onChange={onAccountChange} />
+          <AccountChip account={account} onChange={onAccountChange} open={authOpen} setOpen={setAuthOpen} />
         </div>
         <h1 className="panel__title">Australian Grand Prix</h1>
         <span className="panel__sub">5 laps · 3 tyre compounds · 1 mandatory stop</span>

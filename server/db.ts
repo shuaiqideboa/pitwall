@@ -41,6 +41,23 @@ export async function migrate(db: Db) {
       created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
     )`);
   await db.query(`
+    CREATE TABLE IF NOT EXISTS requests (
+      id         SERIAL PRIMARY KEY,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      text       TEXT NOT NULL,
+      -- queued -> working -> answered | declined | pr_open (-> merged | rejected), or failed
+      status     TEXT NOT NULL DEFAULT 'queued',
+      reply      TEXT,
+      pr_url     TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS agent_state (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )`);
+  await db.query(`
     CREATE TABLE IF NOT EXISTS sessions (
       token_hash TEXT PRIMARY KEY,
       user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

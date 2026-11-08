@@ -104,8 +104,18 @@ function AuthDialog({ onDone, onClose }: { onDone: (a: Account) => void; onClose
 }
 
 /** The account chip in the side panel: "Sign in", or the player's name with "Sign out". */
-export function AccountChip({ account, onChange }: { account: Account | null | undefined; onChange: (a: Account | null) => void }) {
-  const [open, setOpen] = useState(false);
+export function AccountChip({
+  account,
+  onChange,
+  open,
+  setOpen,
+}: {
+  account: Account | null | undefined;
+  onChange: (a: Account | null) => void;
+  /** Whether the sign-in dialog is showing (other parts of the game can open it too). */
+  open: boolean;
+  setOpen: (open: boolean) => void;
+}) {
   if (account === undefined) return null;
   if (account) {
     return (
