@@ -173,7 +173,7 @@ React 18 + TypeScript + Vite. The game engine (`src/game/engine.ts`) is a pure, 
 
 4 players, 5 laps at Albert Park, one die per turn.
 
-- **Lights out:** everyone rolls at once and the field gets away together; the slowest starter moves first.
+- **Lights out:** once everyone has picked starting tyres, the cars wait on the grid until a player presses LIGHTS OUT. Then everyone rolls at once and the field gets away together; the slowest starter moves first.
 - **Tyres:** Soft, Medium and Hard each have their own die. Softs and Mediums wear out. Every car must pit at least once.
 - **Pit lane:** call BOX, crawl through under the limiter, change tyres at your box.
 - **Overtaking:** catch the car ahead and choose to overtake or stay behind. A pass may bring out the Safety Car (25%, 9% in a DRS zone) or a red flag (2%). Nobody is ever knocked out.
