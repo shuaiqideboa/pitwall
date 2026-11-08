@@ -1,9 +1,19 @@
 import { type FormEvent, useEffect, useRef, useState } from 'react';
-import { type Account, signIn, signOut, signUp } from '../account';
+import { type Account, signIn, signUp } from '../account';
 
-/** Sign in / create account, as a dialog over the game. */
-function AuthDialog({ onDone, onClose }: { onDone: (a: Account) => void; onClose: () => void }) {
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+export type AuthMode = 'signin' | 'signup';
+
+/** Sign in / create account, as a dialog over the page. */
+export function AuthDialog({
+  initialMode = 'signin',
+  onDone,
+  onClose,
+}: {
+  initialMode?: AuthMode;
+  onDone: (a: Account) => void;
+  onClose: () => void;
+}) {
+  const [mode, setMode] = useState<AuthMode>(initialMode);
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
@@ -100,49 +110,5 @@ function AuthDialog({ onDone, onClose }: { onDone: (a: Account) => void; onClose
         </button>
       </form>
     </div>
-  );
-}
-
-/** The account chip in the side panel: "Sign in", or the player's name with "Sign out". */
-export function AccountChip({
-  account,
-  onChange,
-  open,
-  setOpen,
-}: {
-  account: Account | null | undefined;
-  onChange: (a: Account | null) => void;
-  /** Whether the sign-in dialog is showing (other parts of the game can open it too). */
-  open: boolean;
-  setOpen: (open: boolean) => void;
-}) {
-  if (account === undefined) return null;
-  if (account) {
-    return (
-      <div className="account">
-        <span className="account__name" title={account.email}>
-          {account.name}
-        </span>
-        <button type="button" className="account__btn" onClick={() => signOut().finally(() => onChange(null))}>
-          Sign out
-        </button>
-      </div>
-    );
-  }
-  return (
-    <>
-      <button type="button" className="account__btn account__btn--primary" onClick={() => setOpen(true)}>
-        Sign in
-      </button>
-      {open && (
-        <AuthDialog
-          onClose={() => setOpen(false)}
-          onDone={(a) => {
-            setOpen(false);
-            onChange(a);
-          }}
-        />
-      )}
-    </>
   );
 }

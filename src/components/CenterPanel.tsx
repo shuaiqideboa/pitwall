@@ -2,8 +2,6 @@ import { SECTOR_COLORS, TOTAL_LAPS, TRACK_LENGTH } from '../game/board';
 import type { Phase } from '../App';
 import { type GameState, type Player, cleanChance, lapOf, mustBox, raceOrder } from '../game/engine';
 import { TYRES, dieFaces, isWorn, tyreLaps } from '../game/tyres';
-import type { Account } from '../account';
-import { AccountChip } from './Account';
 import { Die3D } from './Die3D';
 import { TyreIcon } from './Tyres';
 
@@ -20,11 +18,8 @@ interface CenterPanelProps {
   onRoll: () => void;
   onBox: () => void;
   onOvertake: (go: boolean) => void;
-  /** The signed-in player (null: signed out; undefined: still checking). */
-  account: Account | null | undefined;
-  onAccountChange: (a: Account | null) => void;
-  authOpen: boolean;
-  setAuthOpen: (open: boolean) => void;
+  /** Back to the home page (the race waits there). */
+  onHome: () => void;
 }
 
 function StatusTag({ p }: { p: Player }) {
@@ -65,10 +60,7 @@ export function CenterPanel({
   onRoll,
   onBox,
   onOvertake,
-  account,
-  onAccountChange,
-  authOpen,
-  setAuthOpen,
+  onHome,
 }: CenterPanelProps) {
   const me = state.players[state.current];
   const faces = dieFaces(me);
@@ -101,7 +93,9 @@ export function CenterPanel({
           <span className="eyebrow" style={{ color: accent }}>
             ROUND 1 · ALBERT PARK
           </span>
-          <AccountChip account={account} onChange={onAccountChange} open={authOpen} setOpen={setAuthOpen} />
+          <button type="button" className="account__btn" onClick={onHome} disabled={phase !== 'idle'}>
+            HOME
+          </button>
         </div>
         <h1 className="panel__title">Australian Grand Prix</h1>
         <span className="panel__sub">5 laps · 3 tyre compounds · 1 mandatory stop</span>

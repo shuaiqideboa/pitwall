@@ -528,18 +528,59 @@ button { font: inherit; }
   to { opacity: 1; transform: none; }
 }
 
+/* ---------- home page ---------- */
+
+.home {
+  position: fixed;
+  inset: 0;
+  overflow-y: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: radial-gradient(ellipse at top, #1f2b22, var(--night) 70%);
+  color: var(--paper);
+}
+.home__card {
+  position: relative;
+  width: 100%;
+  max-width: 460px;
+  padding: 36px 32px;
+  border-radius: 18px;
+  background: var(--ink);
+  box-shadow: 0 0 0 2px var(--panel-edge), 0 30px 80px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  /* clip, not hidden: the track drawing pokes past the edge, and a hidden
+     overflow can still be scrolled (e.g. when focus moves), shifting the card. */
+  overflow: clip;
+  isolation: isolate;
+}
+.home__track { position: absolute; top: 18px; right: -40px; z-index: -1; width: 240px; pointer-events: none; }
+.home__track path { fill: none; stroke: var(--panel-edge); stroke-width: 26; stroke-linejoin: round; }
+.home__title { margin: 0; font: 800 64px/0.9 var(--display); text-transform: uppercase; }
+.home__sub { margin: 0 0 10px; font-size: 14px; color: var(--muted-dark); }
+.home__play,
+.home__btn {
+  height: 60px;
+  border-radius: 14px;
+  font: 800 22px var(--display);
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+.home__play { border: none; background: var(--accent); color: #fff; }
+.home__play:hover { filter: brightness(1.08); }
+.home__btn { border: 2px solid var(--paper); background: transparent; color: var(--paper); font-size: 18px; }
+.home__btn:hover { background: var(--paper); color: var(--ink); }
+.home__play:focus-visible,
+.home__btn:focus-visible { outline: 3px solid var(--paper); outline-offset: 2px; }
+.home__account { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 6px; font-size: 13px; color: var(--muted-dark); }
+.home__account strong { color: var(--paper); }
+
 /* ---------- player account ---------- */
 
 .panel__topline { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 30px; }
-.account { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.account__name {
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  font-weight: 700;
-}
 .account__btn {
   padding: 5px 10px;
   border: 1.5px solid var(--muted-dark);
@@ -551,11 +592,12 @@ button { font: inherit; }
   cursor: pointer;
   white-space: nowrap;
 }
-.account__btn:hover { border-color: var(--paper); }
+.account__btn:hover:not(:disabled) { border-color: var(--paper); }
+.account__btn:disabled { opacity: 0.4; cursor: default; }
 .account__btn--primary { border-color: var(--paper); }
 .account__btn:focus-visible { outline: 3px solid var(--paper); outline-offset: 2px; }
 
-/* Fixed inside the scaled artboard, so it covers the whole game. */
+/* Covers the whole page. */
 .auth-backdrop {
   position: fixed;
   inset: 0;
@@ -633,30 +675,12 @@ button { font: inherit; }
 
 /* ---------- Pit Wall: suggest a change ---------- */
 
-.pitwall-toggle {
-  position: absolute;
-  right: 14px;
-  bottom: 14px;
-  padding: 12px 16px;
-  border: none;
-  border-radius: 12px;
-  background: var(--accent, #d7261e);
-  color: #fff;
-  font: 800 16px var(--display);
-  letter-spacing: 0.08em;
-  cursor: pointer;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  z-index: 6; /* above the tyre picker: ideas can come at any moment */
-}
-.pitwall-toggle:hover { filter: brightness(1.08); }
-.pitwall-toggle:focus-visible { outline: 3px solid var(--paper); outline-offset: 2px; }
-
 .pitwall {
   position: absolute;
   top: 14px;
   right: 14px;
-  bottom: 70px;
-  width: 440px;
+  bottom: 14px;
+  width: min(440px, calc(100% - 28px));
   z-index: 6;
   overflow-y: auto;
   padding: 20px;
