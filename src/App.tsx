@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { CenterPanel } from './components/CenterPanel';
+import { RollBar } from './components/RollBar';
 import { TrackMap } from './components/TrackMap';
 import { TyrePicker } from './components/Tyres';
 import { DIE_ROLL_MS } from './components/Die3D';
@@ -14,8 +15,8 @@ import { GAME_CONFIG } from './game/config';
 import { type GameState, type Hop, chooseTyre, decideOvertake, lapOf, lightsOut, newGame, takeTurn, toggleBox } from './game/engine';
 import type { Compound } from './game/tyres';
 
-// Design size. The board stretches to the window's shape, and everything is
-// scaled so the shorter side matches this size.
+// Design size (landscape; portrait uses it turned on its side). The board
+// stretches to the window's shape, and everything is scaled to fit.
 const DESIGN_W = 1440;
 const DESIGN_H = 860;
 // Theme accent from the design's `accent` tweak (options: #D7261E, #E8742A, #1E9E8F, #3366D6).
@@ -107,7 +108,9 @@ export default function App() {
   const driveCount = useRef(0);
 
   const vp = useViewport();
-  const scale = Math.min(vp.w / DESIGN_W, vp.h / DESIGN_H);
+  // A tall window gets the portrait layout (map on top), designed at the same size turned on its side.
+  const portrait = vp.h > vp.w;
+  const scale = portrait ? Math.min(vp.w / DESIGN_H, vp.h / DESIGN_W) : Math.min(vp.w / DESIGN_W, vp.h / DESIGN_H);
 
   /** Animate the hops of `next` (from the cars' current places), then commit it. */
   const play = async (from: GameState, next: GameState) => {
@@ -227,7 +230,10 @@ export default function App() {
         className="artboard"
         style={{ width: vp.w / scale, height: vp.h / scale, transform: `scale(${scale})` }}
       >
-        <div className={`layout ${state.scUntilLap !== null ? 'layout--yellow' : ''}`} style={{ ['--accent' as string]: ACCENT }}>
+        <div
+          className={['layout', portrait ? 'layout--portrait' : '', state.scUntilLap !== null ? 'layout--yellow' : ''].join(' ')}
+          style={{ ['--accent' as string]: ACCENT }}
+        >
           <div className="map-wrap">
             <TrackMap view={view} activeBlock={activeBlock} activeBox={activeBox}>
               <Cars players={state.players} poses={poses} mover={mover} />
@@ -245,8 +251,10 @@ export default function App() {
             <button type="button" className="cam-toggle" onClick={() => setFollow((f) => !f)} aria-pressed={follow}>
               {follow ? 'FULL MAP' : 'FOLLOW CAR'}
             </button>
+            {request && <TyrePicker request={request} player={state.players[request.id]} onChoose={onChooseTyre} />}
           </div>
-          <CenterPanel
+          <CenterPanel state={state} accent={ACCENT} phase={phase} onHome={() => setScreen('home')} />
+          <RollBar
             state={state}
             accent={ACCENT}
             phase={phase}
@@ -256,9 +264,7 @@ export default function App() {
             onRoll={onRoll}
             onBox={onBox}
             onOvertake={onOvertake}
-            onHome={() => setScreen('home')}
           />
-          {request && <TyrePicker request={request} player={state.players[request.id]} onChoose={onChooseTyre} />}
         </div>
       </div>
     </div>

@@ -80,7 +80,7 @@ button { font: inherit; }
   transform-origin: top left;
 }
 
-/* ---------- layout: map + side panel ---------- */
+/* ---------- layout: map + side panel, dice roll bar along the bottom ---------- */
 
 .layout {
   position: relative;
@@ -88,6 +88,8 @@ button { font: inherit; }
   height: 100%;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 410px;
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-areas: 'map panel' 'bar bar';
   gap: 14px;
   border-radius: 18px;
   background: var(--board);
@@ -97,7 +99,24 @@ button { font: inherit; }
 }
 .layout--yellow { box-shadow: 0 0 0 3px #f2c230, 0 30px 80px var(--shadow); }
 
-.map-wrap { position: relative; min-width: 0; min-height: 0; display: flex; overflow: hidden; border-radius: 12px; }
+.map-wrap { grid-area: map; position: relative; min-width: 0; min-height: 0; display: flex; overflow: hidden; border-radius: 12px; }
+
+/* A tall window: the map gets the full width on top, then the race order, then the dice roll bar. */
+.layout--portrait {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto auto;
+  grid-template-areas: 'map' 'panel' 'bar';
+}
+.layout--portrait .panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas: 'heading order' 'lap order';
+  align-content: start;
+  column-gap: 14px;
+}
+.layout--portrait .panel__heading { grid-area: heading; }
+.layout--portrait .lap-box { grid-area: lap; align-self: end; }
+.layout--portrait .order { grid-area: order; }
 
 .minimap {
   position: absolute;
@@ -181,6 +200,7 @@ button { font: inherit; }
 /* ---------- side panel ---------- */
 
 .panel {
+  grid-area: panel;
   position: relative;
   min-height: 0;
   background: var(--surface);
@@ -266,6 +286,38 @@ button { font: inherit; }
 .overtake__stay:hover { background: var(--fg); color: var(--surface); }
 .overtake__go:focus-visible,
 .overtake__stay:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
+
+/* ---------- dice roll bar ---------- */
+
+/* A fixed height, so the map doesn't resize when the overtake call replaces the die. */
+.rollbar {
+  grid-area: bar;
+  height: 152px;
+  padding: 14px 20px;
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--fg);
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+.rollbar .roll-row { flex: 0 1 520px; min-width: 360px; }
+.rollbar__info { flex: 1; min-width: 0; max-height: 100%; overflow: hidden; display: flex; flex-direction: column; gap: 8px; }
+/* The overtake call takes the whole bar: question, odds and note on the left, the two buttons on the right. */
+.rollbar .overtake {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 36%);
+  grid-template-areas: 'head actions' 'odds actions' 'note actions';
+  align-items: center;
+  column-gap: 20px;
+  row-gap: 8px;
+}
+.rollbar .overtake__head { grid-area: head; }
+.rollbar .odds { grid-area: odds; }
+.rollbar .overtake__note { grid-area: note; }
+.rollbar .overtake__actions { grid-area: actions; }
 
 
 .lap-box {
@@ -480,7 +532,7 @@ button { font: inherit; }
 
 .picker {
   position: absolute;
-  inset: 14px 438px 14px 14px;
+  inset: 0;
   z-index: 5;
   background: var(--overlay-strong);
   color: var(--fg);
