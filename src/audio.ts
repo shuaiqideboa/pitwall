@@ -1,8 +1,9 @@
 // Short music cues for the big moments of a race, synthesised with the Web
-// Audio API (original motifs, no audio files). Browsers only allow sound
-// after the player has clicked something, so the context is created lazily.
+// Audio API (original motifs, no audio files). Browsers only allow sound to
+// start from a click or key press, and most cues fire later (after an
+// animation), so the audio is started on every click and key press instead.
 
-export type Cue = 'lights-out' | 'overtake' | 'safety-car' | 'red-flag' | 'pit-stop' | 'final-lap' | 'win';
+export type Cue = 'music-on' | 'lights-out' | 'overtake' | 'safety-car' | 'red-flag' | 'pit-stop' | 'final-lap' | 'win';
 
 type Wave = OscillatorType;
 /** [midi note, start beat, length in beats] */
@@ -48,6 +49,29 @@ function audio() {
   }
   if (ctx.state === 'suspended') void ctx.resume();
   return ctx;
+}
+
+let unlocked = false;
+
+/** Start (or restart) the audio from inside a click or key press, so later cues can be heard. */
+function unlock() {
+  if (muted) return;
+  try {
+    const a = audio();
+    if (!a || unlocked) return;
+    // Some browsers (iOS Safari) also want a sound started during the click: a silent one will do.
+    const src = a.createBufferSource();
+    src.buffer = a.createBuffer(1, 1, a.sampleRate);
+    src.connect(a.destination);
+    src.start();
+    unlocked = true;
+  } catch {
+    // Audio unavailable: play silently on.
+  }
+}
+
+if (typeof window !== 'undefined') {
+  for (const type of ['click', 'touchend', 'keydown']) window.addEventListener(type, unlock, true);
 }
 
 const hz = (midi: number) => 440 * 2 ** ((midi - 69) / 12);
@@ -98,6 +122,10 @@ function wheelGun(times: number[], at = 0) {
 }
 
 const CUES: Record<Cue, () => void> = {
+  // A quick chime when the player switches music on, so they know it works.
+  'music-on': () => {
+    voice([[72, 0, 0.5], [79, 0.5, 1]], { wave: 'sine', bpm: 200, gain: 0.22 });
+  },
   // Five start lights, a beat of silence, then lights out and away.
   'lights-out': () => {
     voice([[69, 0, 0.35], [69, 1, 0.35], [69, 2, 0.35], [69, 3, 0.35], [69, 4, 0.35]], { wave: 'sine', bpm: 140, gain: 0.25 });
