@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { type Account, signOut } from '../account';
 import { TOTAL_LAPS } from '../game/board';
 import { MAP_VIEWBOX, TRACK_PATH } from '../game/track';
+import { type Theme, applyTheme, readTheme } from '../theme';
 import { type AuthMode, AuthDialog } from './Account';
 import { Community } from './Community';
 import { PitWallChat } from './PitWallChat';
@@ -24,6 +25,12 @@ export function Home({
 }) {
   const [auth, setAuth] = useState<AuthMode | null>(null);
   const [panel, setPanel] = useState<'pitwall' | 'community' | null>(null);
+  const [theme, setTheme] = useState<Theme>(readTheme);
+  const switchTheme = () => {
+    const next = theme === 'light' ? 'dark' : 'light';
+    applyTheme(next);
+    setTheme(next);
+  };
   const { x, y, w, h } = MAP_VIEWBOX;
 
   return (
@@ -69,6 +76,9 @@ export function Home({
             </button>
           </div>
         )}
+        <button type="button" className="home__theme" onClick={switchTheme} aria-pressed={theme === 'light'}>
+          {theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+        </button>
       </section>
 
       {panel === 'pitwall' && (
