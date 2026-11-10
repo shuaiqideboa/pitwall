@@ -12,7 +12,7 @@ import { useAccount } from './account';
 import { type Cue, cueLog, isMuted, playCue, setMuted } from './audio';
 import { TOTAL_LAPS, TRACK_LENGTH } from './game/board';
 import { GAME_CONFIG } from './game/config';
-import { type GameState, type Hop, chooseTyre, decideOvertake, lapOf, lightsOut, newGame, takeTurn, toggleBox } from './game/engine';
+import { type GameState, type Hop, chooseTyre, decideOvertake, lapOf, newGame, rollStart, takeTurn, toggleBox } from './game/engine';
 import type { Compound } from './game/tyres';
 
 // Design size (landscape; portrait uses it turned on its side). The board
@@ -49,6 +49,8 @@ interface Drive {
   pit: boolean;
   /** Continues the previous drive without a pause (track ↔ pit lane). */
   chained: boolean;
+  /** Starts at the same moment as the previous drive (cars moving together). */
+  together: boolean;
 }
 
 /**
@@ -63,9 +65,9 @@ function toDrives(trace: Hop[]) {
     const pitSpeed = hop.pit || (!hop.pause && prev?.pit === true);
     const last = drives[drives.length - 1];
     if (hop.pause || !last) {
-      drives.push({ id: hop.id, label: hop.label, steps: [], pit: pitSpeed, chained: false });
+      drives.push({ id: hop.id, label: hop.label, steps: [], pit: pitSpeed, chained: false, together: hop.together === true });
     } else if (pitSpeed !== last.pit) {
-      drives.push({ id: hop.id, steps: [], pit: pitSpeed, chained: true });
+      drives.push({ id: hop.id, steps: [], pit: pitSpeed, chained: true, together: false });
     }
     drives[drives.length - 1].steps.push({ progress: hop.progress, pit: hop.pit });
   });
@@ -100,7 +102,7 @@ export default function App() {
   const [rollId, setRollId] = useState(0);
   const [mover, setMover] = useState<number | null>(null);
   const [caption, setCaption] = useState<string | null>(null);
-  const [anim, setAnim] = useState<CarAnim | null>(null);
+  const [anims, setAnims] = useState<CarAnim[]>([]);
   const [follow, setFollow] = useState(true);
   const [account, setAccount] = useAccount();
   const [screen, setScreen] = useState<'home' | 'race'>('home');
@@ -116,21 +118,29 @@ export default function App() {
   const play = async (from: GameState, next: GameState) => {
     setPhase('moving');
     const pos = positionsOf(from);
-    for (const [i, drive] of toDrives(next.trace).entries()) {
-      if (i > 0 && !drive.chained) await sleep(SEGMENT_PAUSE_MS);
-      if (drive.label) {
-        setCaption(drive.label);
-        const cue = cueFor(drive.label);
+    const drives = toDrives(next.trace);
+    for (let i = 0; i < drives.length; ) {
+      // Drives marked `together` run at the same moment as the one before them.
+      let end = i + 1;
+      while (end < drives.length && drives[end].together) end++;
+      const batch = drives.slice(i, end);
+      if (i > 0 && !batch[0].chained) await sleep(SEGMENT_PAUSE_MS);
+      const label = batch.find((d) => d.label)?.label;
+      if (label) {
+        setCaption(label);
+        const cue = cueFor(label);
         if (cue) playCue(cue);
       }
-      const path = [pos[drive.id], ...drive.steps];
-      const duration = Math.max(MIN_DRIVE_MS, (path.length - 1) * (drive.pit ? PIT_HOP_MS : HOP_MS));
-      setMover(drive.id);
-      setAnim({ id: drive.id, path, duration, key: ++driveCount.current });
+      const duration = Math.max(MIN_DRIVE_MS, ...batch.map((d) => d.steps.length * (d.pit ? PIT_HOP_MS : HOP_MS)));
+      const key = ++driveCount.current;
+      // The camera follows the car going furthest.
+      setMover(batch.reduce((a, b) => (b.steps.length > a.steps.length ? b : a)).id);
+      setAnims(batch.map((d) => ({ id: d.id, path: [pos[d.id], ...d.steps], duration, key })));
       await sleep(duration);
-      pos[drive.id] = path[path.length - 1];
+      for (const d of batch) pos[d.id] = d.steps[d.steps.length - 1];
       setPositions([...pos]);
-      setAnim(null);
+      setAnims([]);
+      i = end;
     }
     if (next.trace.length > 0) await sleep(END_PAUSE_MS);
 
@@ -152,14 +162,8 @@ export default function App() {
       return;
     }
     busy.current = true;
-    if (state.stage === 'grid') {
-      // Everyone is ready: lights out, and the whole field gets away together.
-      playCue('lights-out');
-      await play(state, lightsOut(state));
-      busy.current = false;
-      return;
-    }
-    const next = takeTurn(state);
+    // On the grid each player rolls their start die in turn; nobody moves until the last one has rolled.
+    const next = state.stage === 'grid' ? rollStart(state) : takeTurn(state);
 
     // The 3D die spins toward the rolled face, so the result is set up front.
     setPhase('rolling');
@@ -167,6 +171,8 @@ export default function App() {
     setRollId((n) => n + 1);
     await sleep(DIE_ROLL_MS + SETTLE_MS);
 
+    // The last start roll: lights out, and the whole field gets away together.
+    if (state.stage === 'grid' && next.stage === 'race') playCue('lights-out');
     await play(state, next);
     setFace(null);
     busy.current = false;
@@ -196,7 +202,7 @@ export default function App() {
   const safetyCarAt: CarPos | null =
     state.scUntilLap !== null && leaderOnTrack >= 0 ? { progress: leaderOnTrack + 1, pit: false } : null;
 
-  const poses = useCarPoses({ players: state.players, positions, anim, safetyCar: safetyCarAt });
+  const poses = useCarPoses({ players: state.players, positions, anims, safetyCar: safetyCarAt });
   // The camera follows the car that's moving (or whose turn it is), looking ahead along its heading.
   const focusPose = poses.cars[mover ?? state.current];
   const rad = (focusPose.angle * Math.PI) / 180;

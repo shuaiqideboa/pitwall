@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PIT_BOX_INDEX, PIT_ENTRY_INDEX, TOTAL_LAPS, TRACK_LENGTH } from './board';
 import { GAME_CONFIG } from './config';
-import { type GameState, chooseTyre, decideOvertake, lightsOut, newGame, takeTurn, toggleBox } from './engine';
+import { type GameState, chooseTyre, decideOvertake, newGame, rollStart, takeTurn, toggleBox } from './engine';
 
 // Everyone on Hards: faces [3, 3, 4, 4, 5, 5], so face index 4 rolls a 5.
 const ROLL_5 = 4;
@@ -11,7 +11,7 @@ const ROLL_3 = 0;
 function race(progress: number[], current = 0, patch: Partial<GameState> = {}): GameState {
   let st = newGame();
   while (st.tyreQueue.length) st = chooseTyre(st, 'hard');
-  st = lightsOut(st);
+  while (st.stage === 'grid') st = rollStart(st);
   return {
     ...st,
     ...patch,
@@ -29,29 +29,47 @@ const randomReturns = (...values: number[]) => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('starting a race', () => {
-  it('asks every player for tyres, then waits on the grid until the lights go out', () => {
+  it('asks every player for tyres, then waits on the grid for the start rolls', () => {
     let st = newGame();
     expect(st.stage).toBe('grid');
-    expect(lightsOut(st)).toBe(st); // not before everyone has tyres
+    expect(rollStart(st)).toBe(st); // not before everyone has tyres
     for (let i = 0; i < 4; i++) st = chooseTyre(st, 'medium');
     expect(st.players.every((p) => p.tyre === 'medium')).toBe(true);
     expect(st.stage).toBe('grid');
     expect(st.players.every((p) => p.progress === 0)).toBe(true);
-    expect(takeTurn(st)).toBe(st); // nobody can roll yet
-    st = lightsOut(st);
-    expect(st.stage).toBe('race');
+    expect(takeTurn(st)).toBe(st); // no normal turns before the start
   });
 
-  it('at lights out every car rolls and gets away together; the slowest moves first', () => {
+  it('each player rolls for the start in turn, and nobody moves until the last roll', () => {
     let st = newGame();
     for (let i = 0; i < 4; i++) st = chooseTyre(st, 'hard');
-    // Hards: faces [3, 3, 4, 4, 5, 5]. Rolls 5, 4, 3, 3; the tie for slowest goes to the later of the two.
-    randomReturns(0.9, 0.5, 0.1, 0.1, 0.99);
-    st = lightsOut(st);
+    // Hards: faces [3, 3, 4, 4, 5, 5].
+    for (const [face, next] of [[ROLL_5, 1], [2, 2], [ROLL_3, 3]]) {
+      st = rollStart(st, face);
+      expect(st.stage).toBe('grid');
+      expect(st.current).toBe(next);
+      expect(st.players.every((p) => p.progress === 0)).toBe(true);
+      expect(st.trace).toHaveLength(0);
+    }
+    expect(st.startRolls).toEqual([5, 4, 3]);
+  });
+
+  it('after the last start roll the whole field gets away together; the slowest moves first', () => {
+    let st = newGame();
+    for (let i = 0; i < 4; i++) st = chooseTyre(st, 'hard');
+    // Rolls 5, 4, 3, 3; the tie for slowest goes to the later of the two.
+    for (const face of [ROLL_5, 2, ROLL_3]) st = rollStart(st, face);
+    randomReturns(0.99);
+    st = rollStart(st, ROLL_3);
+    expect(st.stage).toBe('race');
     expect(st.players.map((p) => p.progress)).toEqual([5, 4, 3, 3]);
     expect(st.current).toBe(3);
     expect(st.overtake).toBeNull();
     expect(st.trace).toHaveLength(15);
+    // Every car's move starts at the same moment.
+    const starts = st.trace.filter((h) => h.pause);
+    expect(starts.map((h) => h.id)).toEqual([0, 1, 2, 3]);
+    expect(starts.slice(1).every((h) => h.together)).toBe(true);
   });
 });
 

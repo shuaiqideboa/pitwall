@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { TOTAL_LAPS } from './board';
 import { type Compound } from './config';
-import { type GameState, type Player, chooseTyre, decideOvertake, lapOf, lightsOut, newGame, takeTurn, toggleBox } from './engine';
+import { type GameState, type Player, chooseTyre, decideOvertake, lapOf, newGame, rollStart, takeTurn, toggleBox } from './engine';
 import { TYRES, tyreLaps } from './tyres';
 
 // Plays thousands of seeded races between scripted strategies and checks the
@@ -80,7 +80,7 @@ function simulate(): Results {
         continue;
       }
       if (st.stage === 'grid') {
-        st = lightsOut(st);
+        st = rollStart(st);
         continue;
       }
       if (st.overtake) {

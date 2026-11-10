@@ -46,6 +46,8 @@ export interface Hop {
   pause: boolean;
   /** What caused this move; set on the first hop of each move. */
   label?: string;
+  /** This move starts at the same moment as the one before it (the field getting away at lights out). */
+  together?: boolean;
 }
 
 
@@ -87,6 +89,8 @@ export interface GameState {
   lastRoll: number | null;
   /** Which face of the die came up (0–5), so the 3D die can land on it. */
   lastFace: number | null;
+  /** On the grid: each player's start roll so far, in seat order. */
+  startRolls: number[];
   /** Tyre choices waiting to be made, first one shown. */
   tyreQueue: TyreRequest[];
   /**
@@ -165,6 +169,7 @@ export function newGame(): GameState {
     current: 0,
     lastRoll: null,
     lastFace: null,
+    startRolls: [],
     tyreQueue: players.map((p) => ({ id: p.id, reason: 'grid' })),
     scUntilLap: null,
     overtake: null,
@@ -214,7 +219,7 @@ export function chooseTyre(state: GameState, compound: Compound | null): GameSta
   const tyre = compound ? `${TYRES[compound].name}s` : 'the same tyres';
 
   if (request.reason === 'grid') {
-    const ready = rest.length === 0 ? ' All cars on the grid: lights out when everyone is ready.' : '';
+    const ready = rest.length === 0 ? ` All cars on the grid: ${players[state.current].name} to roll for the start.` : '';
     return { ...state, players, tyreQueue: rest, log: `${p.name} starts on ${tyre}.${ready}` };
   }
 
@@ -226,22 +231,38 @@ export function chooseTyre(state: GameState, compound: Compound | null): GameSta
 }
 
 /**
- * Lights out, once every car has its starting tyres and the players are
- * ready: every player rolls at once and all cars get away together, so
+ * The start, once every car has its starting tyres: each player in turn
+ * rolls their start die, and nobody moves yet. When the last player has
+ * rolled, the lights go out and the whole field gets away together, so
  * nobody gains from moving first off the grid. Cars can share a block. The
  * car that got away slowest (a random one of them, if tied) makes the first
  * move; play then carries on in seat order.
  */
-export function lightsOut(state: GameState): GameState {
+export function rollStart(state: GameState, face = rollFace()): GameState {
   if (state.stage !== 'grid' || state.tyreQueue.length > 0) return state;
+  const me = state.players[state.current];
+  const rolls = [...state.startRolls, dieFaces(me)[face]];
+  if (rolls.length < state.players.length) {
+    const next = nextPlayer(state.players, state.current);
+    return {
+      ...state,
+      current: next,
+      startRolls: rolls,
+      lastRoll: rolls[rolls.length - 1],
+      lastFace: face,
+      trace: [],
+      log: `${me.name} rolls ${rolls[rolls.length - 1]} for the start. ${state.players[next].name} to roll.`,
+    };
+  }
+
   const players = state.players.map((p) => ({ ...p }));
   const trace: Hop[] = [];
-  const rolls = players.map((p) => dieFaces(p)[rollFace()]);
   const label = `LIGHTS OUT! ${players.map((p, i) => `${p.name} rolls ${rolls[i]}`).join(' · ')}`;
   players.forEach((p, i) => {
     for (let step = 0; step < rolls[i]; step++) {
       p.progress += 1;
-      trace.push({ id: p.id, progress: p.progress, pit: false, pause: step === 0, label: i === 0 && step === 0 ? label : undefined });
+      const first = step === 0;
+      trace.push({ id: p.id, progress: p.progress, pit: false, pause: first, together: first && i > 0, label: first && i === 0 ? label : undefined });
     }
   });
   const slowest = Math.min(...rolls);
@@ -252,8 +273,9 @@ export function lightsOut(state: GameState): GameState {
     players,
     stage: 'race',
     current: first.id,
-    lastRoll: null,
-    lastFace: null,
+    startRolls: rolls,
+    lastRoll: rolls[rolls.length - 1],
+    lastFace: face,
     trace,
     log: `Lights out! ${first.name} got away slowest, so moves first.`,
   };

@@ -22,7 +22,8 @@ function StatusTag({ p }: { p: Player }) {
 
 /** The game's side panel: the race, the lap count and the race order. */
 export function CenterPanel({ state, accent, phase, onHome }: CenterPanelProps) {
-  const racing = state.stage === 'race';
+  // Whose turn it is: in the race, or to roll for the start once everyone has tyres.
+  const onTurn = state.stage === 'race' || (state.stage === 'grid' && state.tyreQueue.length === 0);
 
   const order = raceOrder(state.players);
   const leader = order[0];
@@ -95,7 +96,7 @@ export function CenterPanel({ state, accent, phase, onHome }: CenterPanelProps) 
             <span className="order__dot" style={{ background: p.color }} />
             <span className="order__name">
               {p.name}
-              {state.current === p.id && racing ? ' ◂' : ''}
+              {state.current === p.id && onTurn ? ' ◂' : ''}
             </span>
             {p.tyre && <TyreIcon compound={p.tyre} size={18} worn={isWorn(p)} />}
             <StatusTag p={p} />

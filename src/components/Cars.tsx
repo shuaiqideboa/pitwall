@@ -157,8 +157,8 @@ function slotsFor(players: Player[], positions: CarPos[]) {
   };
 }
 
-/** Fraction (0–1) of the current drive, ticking every animation frame. */
-function useDriveClock(anim: CarAnim | null) {
+/** Fraction (0–1) of the current drive, ticking every animation frame. Cars driving together share one clock. */
+function useDriveClock(anim: CarAnim | undefined) {
   const [clock, setClock] = useState({ key: -1, f: 0 });
   useEffect(() => {
     if (!anim) return;
@@ -190,51 +190,56 @@ export interface Poses {
 
 interface PoseInput {
   players: Player[];
-  /** Parked position of every car (the driving car's start, while `anim` runs). */
+  /** Parked position of every car (a driving car's start, while its drive runs). */
   positions: CarPos[];
-  anim: CarAnim | null;
+  /** The drives under way: usually one car, or the whole field at lights out. */
+  anims: CarAnim[];
   /** Where the Safety Car is, while it is out. */
   safetyCar: CarPos | null;
 }
 
 /**
  * Where every car is right now, in map units. Parked cars sit in their block
- * (sharing it in a cluster); the driving car moves each frame along a curve
+ * (sharing it in a cluster); a driving car moves each frame along a curve
  * through the blocks it passes, which follows the drawn road.
  */
-export function useCarPoses({ players, positions, anim, safetyCar }: PoseInput): Poses {
-  const f = useDriveClock(anim);
+export function useCarPoses({ players, positions, anims, safetyCar }: PoseInput): Poses {
+  const f = useDriveClock(anims[0]);
   // Last applied angle per car, so turns go the short way round.
   const angles = useRef<number[]>([]);
 
-  // Park everyone else as if the driving car had already arrived, so its
-  // destination slot is free and cars it leaves behind close up at once.
+  // Park everyone else as if the driving cars had already arrived, so their
+  // destination slots are free and cars they leave behind close up at once.
   const destination = useMemo(() => {
-    if (!anim) return positions;
     const out = [...positions];
-    out[anim.id] = anim.path[anim.path.length - 1];
+    for (const anim of anims) out[anim.id] = anim.path[anim.path.length - 1];
     return out;
-  }, [anim, positions]);
+  }, [anims, positions]);
   const slotOf = slotsFor(players, destination);
 
-  const curve = useMemo(() => {
-    if (!anim) return null;
-    const start = slotsFor(players, positions)(anim.id);
-    const end = slotOf(anim.id);
-    const waypoints = anim.path.map((pos, i) => {
-      if (i === 0) return carPose(pos, start.slot, start.count).point;
-      if (i === anim.path.length - 1) return carPose(pos, end.slot, end.count).point;
-      return carPose(pos, 0, 1).point;
-    });
-    return buildCurve(waypoints);
-  }, [anim, players, positions, destination]); // slotOf derives from destination
+  const curves = useMemo(() => {
+    const startSlot = slotsFor(players, positions);
+    const out = new Map<number, ReturnType<typeof buildCurve>>();
+    for (const anim of anims) {
+      const start = startSlot(anim.id);
+      const end = slotOf(anim.id);
+      const waypoints = anim.path.map((pos, i) => {
+        if (i === 0) return carPose(pos, start.slot, start.count).point;
+        if (i === anim.path.length - 1) return carPose(pos, end.slot, end.count).point;
+        return carPose(pos, 0, 1).point;
+      });
+      out.set(anim.id, buildCurve(waypoints));
+    }
+    return out;
+  }, [anims, players, positions, destination]); // slotOf derives from destination
 
   const cars = players.map((p): CarPose => {
-    const driving = anim?.id === p.id && curve !== null;
+    const curve = curves.get(p.id);
+    const driving = curve !== undefined;
     let point: Point;
     let target: number;
     if (driving) {
-      const pose = curve!(easeInOut(f));
+      const pose = curve(easeInOut(f));
       point = pose.point;
       target = pose.angle ?? angles.current[p.id] ?? 0;
     } else {
