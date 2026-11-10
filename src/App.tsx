@@ -188,6 +188,7 @@ export default function App() {
   const toggleMusic = () => {
     setMuted(!musicOff);
     setMusicOff(!musicOff);
+    if (musicOff) playCue('music-on');
   };
 
   // The Safety Car leads the field: one block ahead of the leading car on track.
@@ -238,7 +239,13 @@ export default function App() {
               <Cars players={state.players} poses={poses} mover={mover} />
             </TrackMap>
             {follow && <MiniMap players={state.players} poses={poses} view={view} />}
-            <button type="button" className="cam-toggle cam-toggle--music" onClick={toggleMusic} aria-pressed={!musicOff}>
+            <button
+              type="button"
+              className="cam-toggle cam-toggle--music"
+              onClick={toggleMusic}
+              aria-pressed={!musicOff}
+              title="Music cues play at the big moments: lights out, overtakes, Safety Car, red flag, pit stops, final lap and the win."
+            >
               {musicOff ? 'MUSIC OFF' : 'MUSIC ON'}
             </button>
             <button type="button" className="cam-toggle" onClick={() => setFollow((f) => !f)} aria-pressed={follow}>
