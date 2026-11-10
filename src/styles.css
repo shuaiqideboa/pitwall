@@ -77,10 +77,16 @@ button { font: inherit; }
 .minimap__sc { fill: #f2c230; stroke: var(--ink); stroke-width: 4; }
 .minimap__view { fill: rgba(243, 240, 232, 0.08); stroke: var(--paper); stroke-width: 5; rx: 10; }
 
-.cam-toggle {
+/* The map's buttons, together at the bottom right (the mini-map has the bottom left). */
+.map-menu {
   position: absolute;
-  top: 14px;
-  left: 14px;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  gap: 10px;
+}
+
+.cam-toggle {
   padding: 10px 16px;
   border: 2px solid var(--paper);
   border-radius: 10px;
@@ -91,7 +97,6 @@ button { font: inherit; }
   cursor: pointer;
 }
 .cam-toggle:hover { background: var(--paper); color: var(--ink); }
-.cam-toggle--music { left: auto; right: 14px; }
 .cam-toggle--music[aria-pressed='false'] { opacity: 0.6; }
 .cam-toggle:focus-visible { outline: 3px solid var(--paper); outline-offset: 2px; }
 

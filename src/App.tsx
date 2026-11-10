@@ -232,12 +232,14 @@ export default function App() {
               <Cars players={state.players} poses={poses} mover={mover} />
             </TrackMap>
             {follow && <MiniMap players={state.players} poses={poses} view={view} />}
-            <button type="button" className="cam-toggle cam-toggle--music" onClick={toggleMusic} aria-pressed={!musicOff}>
-              {musicOff ? 'MUSIC OFF' : 'MUSIC ON'}
-            </button>
-            <button type="button" className="cam-toggle" onClick={() => setFollow((f) => !f)} aria-pressed={follow}>
-              {follow ? 'FULL MAP' : 'FOLLOW CAR'}
-            </button>
+            <div className="map-menu">
+              <button type="button" className="cam-toggle" onClick={() => setFollow((f) => !f)} aria-pressed={follow}>
+                {follow ? 'FULL MAP' : 'FOLLOW CAR'}
+              </button>
+              <button type="button" className="cam-toggle cam-toggle--music" onClick={toggleMusic} aria-pressed={!musicOff}>
+                {musicOff ? 'MUSIC OFF' : 'MUSIC ON'}
+              </button>
+            </div>
           </div>
           <CenterPanel
             state={state}
