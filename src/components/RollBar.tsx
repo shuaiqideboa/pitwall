@@ -95,7 +95,7 @@ export function RollBar({ state, accent, phase, face, rollId, caption, onRoll, o
                   : state.stage === 'finished'
                     ? 'NEW RACE'
                     : state.stage === 'grid'
-                      ? 'LIGHTS OUT'
+                      ? 'START ROLL'
                       : 'ROLL'}
             </button>
             <button
