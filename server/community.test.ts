@@ -43,36 +43,32 @@ const community = async (cookie?: string) =>
     signedIn: boolean;
   };
 
-describe('community page', () => {
-  it('shows only ideas that became a change, to anyone', async () => {
+describe('community', () => {
+  it('publicly shows only proposed or shipped ideas without emails or PR links', async () => {
     const alice = await player('Alice');
     await idea(alice.id, 'Waiting for review', 'pr_open');
     await idea(alice.id, 'Already live', 'merged');
     for (const status of ['queued', 'working', 'answered', 'declined', 'failed', 'rejected']) {
       await idea(alice.id, `Hidden ${status}`, status);
     }
-    const page = await community(); // signed out
+    const page = await community();
     expect(page.signedIn).toBe(false);
     expect(page.waiting.map((i) => i.text)).toEqual(['Waiting for review']);
     expect(page.live.map((i) => i.text)).toEqual(['Already live']);
     expect(page.waiting[0]).toMatchObject({ player: 'Alice', mine: false, voted: false });
+    expect(JSON.stringify(page)).not.toContain('@example.com');
+    expect(JSON.stringify(page)).not.toContain('github.com');
   });
 
-  it('never exposes emails or pull request links', async () => {
-    const alice = await player('Alice');
-    await idea(alice.id, 'Waiting for review', 'pr_open');
-    const raw = await (await app.request('/api/community')).text();
-    expect(raw).not.toContain('@example.com');
-    expect(raw).not.toContain('github.com');
-  });
-
-  it('sorts waiting ideas by votes, most wanted first', async () => {
+  it('ranks ideas by unique votes and supports withdrawing a vote', async () => {
     const alice = await player('Alice');
     const bob = await player('Bob');
     const cara = await player('Cara');
     const few = await idea(alice.id, 'Fewer votes', 'pr_open');
     const many = await idea(alice.id, 'More votes', 'pr_open');
     await post(`/api/community/${many}/vote`, { vote: true }, bob.cookie);
+    const repeated = await post(`/api/community/${many}/vote`, { vote: true }, bob.cookie);
+    expect(await repeated.json()).toEqual({ votes: 1, voted: true });
     await post(`/api/community/${many}/vote`, { vote: true }, cara.cookie);
     await post(`/api/community/${few}/vote`, { vote: true }, bob.cookie);
     const page = await community(bob.cookie);
@@ -80,49 +76,28 @@ describe('community page', () => {
       ['More votes', 2, true],
       ['Fewer votes', 1, true],
     ]);
-  });
-});
-
-describe('voting', () => {
-  it('needs a signed-in player', async () => {
-    const alice = await player('Alice');
-    const id = await idea(alice.id, 'An idea', 'pr_open');
-    expect((await post(`/api/community/${id}/vote`, { vote: true })).status).toBe(401);
-  });
-
-  it('counts one vote per player, and a vote can be taken back', async () => {
-    const alice = await player('Alice');
-    const bob = await player('Bob');
-    const id = await idea(alice.id, 'An idea', 'pr_open');
-    await post(`/api/community/${id}/vote`, { vote: true }, bob.cookie);
-    const twice = await post(`/api/community/${id}/vote`, { vote: true }, bob.cookie);
-    expect(await twice.json()).toEqual({ votes: 1, voted: true });
-    const undo = await post(`/api/community/${id}/vote`, { vote: false }, bob.cookie);
+    const undo = await post(`/api/community/${few}/vote`, { vote: false }, bob.cookie);
     expect(await undo.json()).toEqual({ votes: 0, voted: false });
   });
 
-  it("doesn't let players vote for their own idea", async () => {
-    const alice = await player('Alice');
-    const id = await idea(alice.id, 'My own idea', 'pr_open');
-    expect((await post(`/api/community/${id}/vote`, { vote: true }, alice.cookie)).status).toBe(403);
-    expect((await community(alice.cookie)).waiting[0]).toMatchObject({ mine: true, votes: 0 });
-  });
-
-  it('only allows votes while an idea waits for review', async () => {
+  it('rejects unauthenticated, self, closed, hidden and malformed votes', async () => {
     const alice = await player('Alice');
     const bob = await player('Bob');
+    const open = await idea(alice.id, 'My own idea', 'pr_open');
     const live = await idea(alice.id, 'Already live', 'merged');
     const declined = await idea(alice.id, 'Declined', 'declined');
-    expect((await post(`/api/community/${live}/vote`, { vote: true }, bob.cookie)).status).toBe(409);
-    expect((await post(`/api/community/${declined}/vote`, { vote: true }, bob.cookie)).status).toBe(404);
-    expect((await post('/api/community/99999/vote', { vote: true }, bob.cookie)).status).toBe(404);
-  });
-
-  it('rejects malformed votes', async () => {
-    const alice = await player('Alice');
-    const bob = await player('Bob');
-    const id = await idea(alice.id, 'An idea', 'pr_open');
-    expect((await post(`/api/community/${id}/vote`, { vote: 'yes' }, bob.cookie)).status).toBe(400);
-    expect((await post('/api/community/abc/vote', { vote: true }, bob.cookie)).status).toBe(400);
+    const cases = [
+      { label: 'signed out', id: open, vote: true, cookie: undefined, status: 401 },
+      { label: 'own idea', id: open, vote: true, cookie: alice.cookie, status: 403 },
+      { label: 'merged', id: live, vote: true, cookie: bob.cookie, status: 409 },
+      { label: 'hidden', id: declined, vote: true, cookie: bob.cookie, status: 404 },
+      { label: 'missing', id: 99999, vote: true, cookie: bob.cookie, status: 404 },
+      { label: 'invalid vote', id: open, vote: 'yes', cookie: bob.cookie, status: 400 },
+      { label: 'invalid id', id: 'abc', vote: true, cookie: bob.cookie, status: 400 },
+    ];
+    for (const test of cases) {
+      expect.soft((await post(`/api/community/${test.id}/vote`, { vote: test.vote }, test.cookie)).status, test.label).toBe(test.status);
+    }
+    expect((await community(alice.cookie)).waiting[0]).toMatchObject({ mine: true, votes: 0 });
   });
 });

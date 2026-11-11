@@ -29,20 +29,15 @@ const randomReturns = (...values: number[]) => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('starting a race', () => {
-  it('asks every player for tyres, then waits on the grid for the start rolls', () => {
+  it('waits for all tyres and rolls, then launches everyone together with the slowest moving first', () => {
     let st = newGame();
     expect(st.stage).toBe('grid');
     expect(rollStart(st)).toBe(st); // not before everyone has tyres
-    for (let i = 0; i < 4; i++) st = chooseTyre(st, 'medium');
-    expect(st.players.every((p) => p.tyre === 'medium')).toBe(true);
+    for (let i = 0; i < 4; i++) st = chooseTyre(st, 'hard');
+    expect(st.players.every((p) => p.tyre === 'hard')).toBe(true);
     expect(st.stage).toBe('grid');
     expect(st.players.every((p) => p.progress === 0)).toBe(true);
     expect(takeTurn(st)).toBe(st); // no normal turns before the start
-  });
-
-  it('each player rolls for the start in turn, and nobody moves until the last roll', () => {
-    let st = newGame();
-    for (let i = 0; i < 4; i++) st = chooseTyre(st, 'hard');
     // Hards: faces [3, 3, 4, 4, 5, 5].
     for (const [face, next] of [[ROLL_5, 1], [2, 2], [ROLL_3, 3]]) {
       st = rollStart(st, face);
@@ -52,13 +47,8 @@ describe('starting a race', () => {
       expect(st.trace).toHaveLength(0);
     }
     expect(st.startRolls).toEqual([5, 4, 3]);
-  });
 
-  it('after the last start roll the whole field gets away together; the slowest moves first', () => {
-    let st = newGame();
-    for (let i = 0; i < 4; i++) st = chooseTyre(st, 'hard');
-    // Rolls 5, 4, 3, 3; the tie for slowest goes to the later of the two.
-    for (const face of [ROLL_5, 2, ROLL_3]) st = rollStart(st, face);
+    // The last roll ties for slowest; the later car moves first.
     randomReturns(0.99);
     st = rollStart(st, ROLL_3);
     expect(st.stage).toBe('race');
@@ -74,15 +64,14 @@ describe('starting a race', () => {
 });
 
 describe('overtaking', () => {
-  it('stops behind the car ahead and asks the player', () => {
-    const st = takeTurn(race([10, 12, 0, 0]), ROLL_5);
-    expect(st.overtake).not.toBeNull();
-    expect(st.overtake!.rivals).toEqual([1]);
-    expect(st.players[0].progress).toBe(11);
-  });
-
-  it('a clean pass goes past and uses the rest of the roll', () => {
+  it('asks before passing and respects either choice', () => {
     const asked = takeTurn(race([10, 12, 0, 0]), ROLL_5);
+    expect(asked.overtake?.rivals).toEqual([1]);
+    expect(asked.players[0].progress).toBe(11);
+    const stayed = decideOvertake(asked, false);
+    expect(stayed.players[0].progress).toBe(11);
+    expect(stayed.current).toBe(1);
+
     randomReturns(0.99); // no incident
     const st = decideOvertake(asked, true);
     expect(st.incident).toBeNull();
@@ -111,25 +100,15 @@ describe('overtaking', () => {
     expect(st.tyreQueue.map((r) => r.reason)).toEqual(['red-flag', 'red-flag', 'red-flag', 'red-flag']);
   });
 
-  it('staying behind ends the move', () => {
-    const asked = takeTurn(race([10, 12, 0, 0]), ROLL_5);
-    const st = decideOvertake(asked, false);
-    expect(st.players[0].progress).toBe(11);
-    expect(st.current).toBe(1);
-  });
-
   it('with only 1 block left the car just follows', () => {
     const st = takeTurn(race([10, 15, 0, 0]), ROLL_5); // reaches 14 with 1 to spare
     expect(st.overtake).toBeNull();
     expect(st.players[0].progress).toBe(14);
   });
 
-  it('a lapped car can still try to pass the car ahead', () => {
-    const st = takeTurn(race([10, TRACK_LENGTH + 11, 0, 0]), ROLL_5);
-    expect(st.overtake?.rivals).toEqual([1]);
-  });
-
-  it('a lapped car waves the faster car through (blue flags)', () => {
+  it('uses blue flags only when passing a car a lap behind', () => {
+    const behind = takeTurn(race([10, TRACK_LENGTH + 11, 0, 0]), ROLL_5);
+    expect(behind.overtake?.rivals).toEqual([1]);
     const st = takeTurn(race([TRACK_LENGTH + 10, 11, 0, 0]), ROLL_5);
     expect(st.overtake).toBeNull();
     expect(st.players[0].progress).toBe(TRACK_LENGTH + 15);
@@ -169,19 +148,12 @@ describe('pit lane', () => {
     expect(st.stage).toBe('race');
   });
 
-  it('cannot win without a stop', () => {
-    const almost = TOTAL_LAPS * TRACK_LENGTH - 2;
-    let st = race([almost, 0, 0, 0]);
-    st = { ...st, players: st.players.map((p, i) => (i === 0 ? { ...p, stops: 0 } : p)) };
-    st = takeTurn(st, ROLL_5);
-    expect(st.stage).not.toBe('finished');
-  });
-
-  it('wins once over the line with a stop done', () => {
-    let st = race([TOTAL_LAPS * TRACK_LENGTH - 2, 0, 0, 0]);
-    st = { ...st, players: st.players.map((p, i) => (i === 0 ? { ...p, stops: 1 } : p)) };
-    st = takeTurn(st, ROLL_5);
-    expect(st.stage).toBe('finished');
-    expect(st.winner).toBe(0);
+  it('can win across the finish line only after making a stop', () => {
+    // Already past the pit entry: forced entry must not mask the finish-rule check.
+    const crossedWithoutStop = race([TOTAL_LAPS * TRACK_LENGTH, 0, 0, 0]);
+    expect(takeTurn(crossedWithoutStop, ROLL_3)).toMatchObject({ stage: 'race', winner: null });
+    const almost = race([TOTAL_LAPS * TRACK_LENGTH - 2, 0, 0, 0]);
+    const stopped = { ...almost, players: almost.players.map((p, i) => (i === 0 ? { ...p, stops: 1 } : p)) };
+    expect(takeTurn(stopped, ROLL_5)).toMatchObject({ stage: 'finished', winner: 0 });
   });
 });

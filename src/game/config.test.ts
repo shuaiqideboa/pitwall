@@ -12,17 +12,16 @@ describe('game config', () => {
     expect(validateConfig(GAME_CONFIG)).toEqual([]);
   });
 
-  it('rejects values outside their allowed range', () => {
-    expect(validateConfig(withChange((c) => (c.race.laps = 50)))).toEqual([
-      'race.laps must be between 1 and 10 (got 50)',
-    ]);
-    expect(validateConfig(withChange((c) => (c.pitLane.speedLimit = 0)))[0]).toMatch(/pitLane.speedLimit/);
-  });
-
-  it('rejects fractions where a whole number is needed', () => {
-    expect(validateConfig(withChange((c) => (c.overtaking.cost = 1.5)))).toEqual([
-      'overtaking.cost must be a whole number (got 1.5)',
-    ]);
+  it('rejects out-of-range, fractional and nonnumeric settings', () => {
+    const cases: [string, (c: GameConfig) => void, string][] = [
+      ['above maximum', (c) => { c.race.laps = 50; }, 'race.laps must be between 1 and 10 (got 50)'],
+      ['below minimum', (c) => { c.pitLane.speedLimit = 0; }, 'pitLane.speedLimit must be between 1 and 5 (got 0)'],
+      ['fractional integer', (c) => { c.overtaking.cost = 1.5; }, 'overtaking.cost must be a whole number (got 1.5)'],
+      ['nonnumeric', (c) => { (c.camera as unknown as Record<string, unknown>).followZoom = 'very close'; }, 'camera.followZoom must be a number'],
+    ];
+    for (const [label, change, error] of cases) {
+      expect.soft(validateConfig(withChange(change)), label).toEqual([error]);
+    }
   });
 
   it('checks every die face', () => {
@@ -46,10 +45,5 @@ describe('game config', () => {
       const worst = max(`overtaking.${key}.safety-car`) + max(`overtaking.${key}.red-flag`);
       expect(1 - worst).toBeGreaterThanOrEqual(0.2 - 1e-9); // at least a 20% clean pass
     }
-  });
-
-  it('rejects things that are not numbers at all', () => {
-    const broken = withChange((c) => ((c.camera as unknown as Record<string, unknown>).followZoom = 'very close'));
-    expect(validateConfig(broken)).toEqual(['camera.followZoom must be a number']);
   });
 });

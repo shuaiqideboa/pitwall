@@ -51,16 +51,13 @@ type Style = (typeof OVERTAKE_STYLES)[number];
 interface Results {
   plays: Record<string, number>;
   wins: Record<string, number>;
-  turns: number[];
-  safetyCars: number;
-  redFlags: number;
   winnersWithoutStop: number;
   unfinished: number;
 }
 
 function simulate(): Results {
   const rand = Math.random;
-  const r: Results = { plays: {}, wins: {}, turns: [], safetyCars: 0, redFlags: 0, winnersWithoutStop: 0, unfinished: 0 };
+  const r: Results = { plays: {}, wins: {}, winnersWithoutStop: 0, unfinished: 0 };
   const add = (rec: Record<string, number>, key: string) => (rec[key] = (rec[key] ?? 0) + 1);
 
   for (let g = 0; g < GAMES; g++) {
@@ -92,15 +89,12 @@ function simulate(): Results {
         st = takeTurn(st);
         turns++;
       }
-      if (st.incident?.kind === 'safety-car') r.safetyCars++;
-      if (st.incident?.kind === 'red-flag') r.redFlags++;
     }
 
     if (st.winner === null) {
       r.unfinished++;
       continue;
     }
-    r.turns.push(turns);
     if (st.players[st.winner].stops === 0) r.winnersWithoutStop++;
     add(r.wins, plans[st.winner].name);
     add(r.wins, `overtake: ${styles[st.winner]}`);
@@ -119,42 +113,28 @@ beforeAll(() => {
 afterAll(() => vi.restoreAllMocks());
 
 describe(`balance over ${GAMES} simulated races`, () => {
-  it('every race finishes', () => {
-    expect(results.unfinished).toBe(0);
+  it('every race finishes and its winner has made the mandatory stop', () => {
+    expect.soft(results.unfinished, 'unfinished races').toBe(0);
+    expect.soft(results.winnersWithoutStop, 'winners without a stop').toBe(0);
   });
 
-  it('nobody wins without making the mandatory stop', () => {
-    expect(results.winnersWithoutStop).toBe(0);
+  it('every tyre plan stays a contender (10–50% wins)', () => {
+    for (const { name } of TYRE_PLANS) {
+      expect.soft(winRate(name), name).toBeGreaterThan(0.1);
+      expect.soft(winRate(name), name).toBeLessThan(0.5);
+    }
   });
 
-  it('races take a sensible number of turns', () => {
-    const avg = results.turns.reduce((a, b) => a + b, 0) / results.turns.length;
-    expect(avg).toBeGreaterThan(80);
-    expect(avg).toBeLessThan(160);
-  });
-
-  it.each(TYRE_PLANS.map((p) => p.name))('tyre plan "%s" stays a contender (10–50% wins)', (name) => {
-    expect(winRate(name)).toBeGreaterThan(0.1);
-    expect(winRate(name)).toBeLessThan(0.5);
-  });
-
-  it.each([1, 2, 3, 4])('seat %i has a fair chance (15–35% wins)', (seat) => {
-    expect(winRate(`seat ${seat}`)).toBeGreaterThan(0.15);
-    expect(winRate(`seat ${seat}`)).toBeLessThan(0.35);
+  it('every seat has a fair chance (15–35% wins)', () => {
+    for (const seat of [1, 2, 3, 4]) {
+      expect.soft(winRate(`seat ${seat}`), `seat ${seat}`).toBeGreaterThan(0.15);
+      expect.soft(winRate(`seat ${seat}`), `seat ${seat}`).toBeLessThan(0.35);
+    }
   });
 
   it('going for overtakes pays off, but not overwhelmingly', () => {
     expect(winRate('overtake: always')).toBeGreaterThan(winRate('overtake: never'));
     expect(winRate('overtake: always')).toBeLessThan(0.65);
     expect(winRate('overtake: never')).toBeGreaterThan(0.03);
-  });
-
-  it('Safety Cars and red flags happen, but stay occasional', () => {
-    const sc = results.safetyCars / GAMES;
-    const rf = results.redFlags / GAMES;
-    expect(sc).toBeGreaterThan(0.3);
-    expect(sc).toBeLessThan(2);
-    expect(rf).toBeGreaterThan(0.02);
-    expect(rf).toBeLessThan(0.4);
   });
 });

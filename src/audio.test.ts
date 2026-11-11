@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 // A stand-in for the browser's audio. Like a real AudioContext created
 // outside a click, it starts suspended; it records what gets played.
@@ -36,25 +36,22 @@ beforeAll(async () => {
   vi.stubGlobal('window', Object.assign(page, { AudioContext: FakeAudioContext }));
   audio = await import('./audio');
 });
+afterAll(() => vi.unstubAllGlobals());
 
 describe('music cues', () => {
-  it('stay silent while music is off, even on clicks', () => {
+  it('stays silent when muted, plays when enabled, and resumes after browser suspension', () => {
     audio.setMuted(true);
     page.dispatchEvent(new Event('click'));
     audio.playCue('overtake');
     expect(created).toHaveLength(0);
     expect(started).not.toHaveBeenCalled();
-  });
 
-  it('switching music on plays a chime straight away', () => {
     audio.setMuted(false);
     audio.playCue('music-on');
     expect(created).toHaveLength(1);
     expect(created[0].resume).toHaveBeenCalled();
     expect(started).toHaveBeenCalled();
-  });
 
-  it('a click or key press restarts audio the browser has paused, so later cues are heard', () => {
     const ctx = created[0];
     for (const type of ['click', 'keydown']) {
       ctx.state = 'suspended';

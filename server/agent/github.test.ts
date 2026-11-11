@@ -17,50 +17,43 @@ function fixture(responses: [unknown, number?][]) {
 }
 
 describe('server-owned GitHub publishing', () => {
-  it('blocks edits and deletions of the existing core rule tests before review or any API call', async () => {
+  it('rejects invalid requests, protected files, traversal and oversized changes before any API call', async () => {
     const { fetcher, review, publisher } = fixture([]);
+    await expect(publisher.lookup({ request_id: 13 })).rejects.toThrow(/12/);
+    await expect(publisher.submit({ ...input, request_id: 13 })).rejects.toThrow(/12/);
     for (const path of ['src/game/engine.test.ts', 'src/game/config.test.ts', 'src/game/balance.test.ts']) {
       for (const content of [null, 'test.skip("fairness", () => {});']) {
         await expect(publisher.submit({ ...input, files: [{ path, content }] })).rejects.toThrow(/protected/);
       }
     }
-    expect(review).not.toHaveBeenCalled();
-    expect(fetcher).not.toHaveBeenCalled();
-  });
-  it('reviews exact base and proposed content and rejects unfair code before any write', async () => {
-    const { fetcher, review, publisher } = fixture([[[]], [{ object: { sha: base } }], [{ sha: base, tree: { sha: 'base-tree' } }]]);
-    review.mockResolvedValue({ decision: 'decline', reason: 'unfair' });
-    await expect(publisher.submit(input)).rejects.toThrow(/Policy rejected/);
-    expect(review).toHaveBeenCalledWith([{ path: 'src/example.ts', before: 'export const label = "Old";\n', after: input.files[0].content }]);
-    const calls = fetcher.mock.calls as unknown as [string, RequestInit][];
-    expect(calls.every(([, init]) => init.method === 'GET')).toBe(true);
-  });
-  it('fails closed on a code-review outage', async () => {
-    const { fetcher, review, publisher } = fixture([[[]], [{ object: { sha: base } }], [{ sha: base, tree: { sha: 'base-tree' } }]]);
-    review.mockRejectedValue(new Error('review unavailable'));
-    await expect(publisher.submit(input)).rejects.toThrow(/review unavailable/);
-    const calls = fetcher.mock.calls as unknown as [string, RequestInit][];
-    expect(calls.every(([, init]) => init.method === 'GET')).toBe(true);
-  });
-  it('rejects other requests, protected paths, traversal, duplicate paths and large payloads before any network call', async () => {
-    const { fetcher, publisher } = fixture([]);
-    await expect(publisher.lookup({ request_id: 13 })).rejects.toThrow(/12/);
-    await expect(publisher.submit({ ...input, request_id: 13 })).rejects.toThrow(/12/);
     for (const path of ['server/app.ts', '.github/workflows/ci.yml', 'package.json', 'src/../server/app.ts', 'src/.env', 'src/account.ts', 'src/components/Account.tsx']) {
       await expect(publisher.submit({ ...input, files: [{ path, content: 'bad' }] })).rejects.toThrow(/Only src/);
     }
     await expect(publisher.submit({ ...input, files: [input.files[0], input.files[0]] })).rejects.toThrow(/Duplicate/);
     await expect(publisher.submit({ ...input, files: [{ path: 'src/x.ts', content: 'x'.repeat(1024 * 1024 + 1) }] })).rejects.toThrow(/1 MiB/);
+    expect(review).not.toHaveBeenCalled();
     expect(fetcher).not.toHaveBeenCalled();
   });
-  it('reuses an existing PR without creating or updating anything', async () => {
-    const { publisher, fetcher } = fixture([[[pr]]]);
-    expect(await publisher.submit(input)).toEqual({ pr_url: pr.html_url, state: 'open' });
-    expect(fetcher).toHaveBeenCalledOnce();
+  it('reviews exact code and blocks every write on rejection or review failure', async () => {
+    for (const failure of ['rejected', 'unavailable']) {
+      const { fetcher, review, publisher } = fixture([[[]], [{ object: { sha: base } }], [{ sha: base, tree: { sha: 'base-tree' } }]]);
+      if (failure === 'rejected') review.mockResolvedValue({ decision: 'decline', reason: 'unfair' });
+      else review.mockRejectedValue(new Error('review unavailable'));
+      await expect.soft(publisher.submit(input), failure).rejects.toThrow(failure === 'rejected' ? /Policy rejected/ : /review unavailable/);
+      expect.soft(review, failure).toHaveBeenCalledWith([{ path: 'src/example.ts', before: 'export const label = "Old";\n', after: input.files[0].content }]);
+      const calls = fetcher.mock.calls as unknown as [string, RequestInit][];
+      expect.soft(calls.every(([, init]) => init.method === 'GET'), failure).toBe(true);
+    }
   });
-  it('reports merged requests so they cannot be reopened by a retry', async () => {
-    const { publisher } = fixture([[[{ ...pr, state: 'closed', merged_at: '2026-11-11' }]]]);
-    expect(await publisher.lookup({ request_id: 12 })).toEqual({ pr_url: pr.html_url, state: 'merged' });
+  it('returns existing open or merged PRs without publishing another', async () => {
+    for (const existing of [pr, { ...pr, state: 'closed', merged_at: '2026-11-11' }]) {
+      const { publisher, fetcher } = fixture([[[existing]], [[existing]]]);
+      const expected = { pr_url: pr.html_url, state: existing.merged_at ? 'merged' : 'open' };
+      expect(await publisher.lookup({ request_id: 12 })).toEqual(expected);
+      expect(await publisher.submit(input)).toEqual(expected);
+      const calls = fetcher.mock.calls as unknown as [string, RequestInit][];
+      expect(calls.every(([, init]) => init.method === 'GET')).toBe(true);
+    }
   });
   it('requires revalidation if main moved, before any mutation', async () => {
     const { publisher, fetcher } = fixture([[[]], [{ object: { sha: 'b'.repeat(40) } }], [{ sha: 'b'.repeat(40), tree: { sha: 'base-tree' } }]]);
@@ -76,9 +69,10 @@ describe('server-owned GitHub publishing', () => {
       expect(options.redirect).toBe('error');
       expect(options.headers).toMatchObject({ Authorization: 'Bearer private-token' });
     }
-    expect(JSON.parse(calls[4][1].body as string)).toMatchObject({ base_tree: 'base-tree', tree: [{ path: 'src/example.ts', mode: '100644', type: 'blob', content: input.files[0].content }] });
-    expect(JSON.parse(calls[7][1].body as string)).toEqual({ ref: 'refs/heads/pitwall/request-12', sha: 'new-commit' });
-    expect(JSON.parse(calls[8][1].body as string)).toMatchObject({ head: 'pitwall/request-12', base: 'main' });
+    const bodyFor = (path: string) => JSON.parse(calls.find(([url, options]) => url.endsWith(path) && options.method === 'POST')![1].body as string);
+    expect(bodyFor('/git/trees')).toMatchObject({ base_tree: 'base-tree', tree: [{ path: 'src/example.ts', mode: '100644', type: 'blob', content: input.files[0].content }] });
+    expect(bodyFor('/git/refs')).toEqual({ ref: 'refs/heads/pitwall/request-12', sha: 'new-commit' });
+    expect(bodyFor('/pulls')).toMatchObject({ head: 'pitwall/request-12', base: 'main' });
   });
   it('recovers a branch created before a failed PR response without overwriting commits', async () => {
     const { publisher, fetcher } = fixture([[[]], [{ object: { sha: base } }], [{ sha: base, tree: { sha: 'base-tree' } }], [{ sha: 'new-tree' }], [{ object: { sha: 'existing-commit' } }], [{ tree: { sha: 'new-tree' } }], [pr]]);
@@ -89,7 +83,8 @@ describe('server-owned GitHub publishing', () => {
   it('never overwrites differing work on an existing request branch', async () => {
     const { publisher, fetcher } = fixture([[[]], [{ object: { sha: base } }], [{ sha: base, tree: { sha: 'base-tree' } }], [{ sha: 'new-tree' }], [{ object: { sha: 'existing-commit' } }], [{ tree: { sha: 'different-tree' } }]]);
     await expect(publisher.submit(input)).rejects.toThrow(/different work/);
-    expect(fetcher).toHaveBeenCalledTimes(7);
+    const calls = fetcher.mock.calls as unknown as [string, RequestInit][];
+    expect(calls.filter(([, init]) => init.method !== 'GET').every(([url]) => url.endsWith('/git/trees'))).toBe(true);
   });
   it('does not expose response bodies or credentials in API failures', async () => {
     const { publisher } = fixture([[{ message: 'private-token' }, 403]]);
