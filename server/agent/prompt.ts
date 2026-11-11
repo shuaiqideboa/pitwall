@@ -3,6 +3,7 @@
 // Changing it changes the agent: run `npm run agent:setup` to push a new
 // definition (existing sessions keep their copied configuration).
 import type { AgentToolParam } from 'openai/resources/beta/agents/agents';
+import { GAME_POLICY } from './policy';
 
 export const AGENT_NAME = 'Pit Wall';
 export const AGENT_MODEL = 'gpt-6-astra';
@@ -22,6 +23,10 @@ Decline, with a short friendly reason, anything that is:
 - about accounts, other players' data, security settings, payments, the server's secrets, CI workflows (.github/) or deployment;
 - already done, or the same as a request you are working on (say so, and fold it in).
 If a request is unclear, make the most reasonable small interpretation rather than asking; say what you assumed.
+
+## Non-negotiable scope and game rules
+${GAME_POLICY}
+The server screens requests independently and reviews proposed code before any branch or PR is created. Do not try to bypass a rejection. The existing engine, config and balance test files are protected; you may add new regression tests in other files.
 
 ## How you work on a change
 The repo is checked out at ${REPO_PATH}. One request at a time:
