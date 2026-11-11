@@ -1,31 +1,20 @@
-// One-time setup (safe to re-run): creates the agent's environment and the
-// Pit Wall agent, or updates the existing agent in place with the current
-// definition. Prints the ids to store as Railway variables.
-//
-//   railway run --service game -- npx tsx server/agent/setup.ts
-//
-// Never run per request: sessions only reference these ids.
-import Anthropic from '@anthropic-ai/sdk';
-import { agentParams, environmentParams } from './definition';
+// Provision the saved agent only. GitHub credentials never go to OpenAI.
+import OpenAI from 'openai';
+import { pathToFileURL } from 'node:url';
+import { agentParams } from './definition';
+import { AGENT_MODEL } from './prompt';
 
-const client = new Anthropic({ apiKey: process.env.claude_api_key ?? process.env.ANTHROPIC_API_KEY });
-
-let environmentId = process.env.PITWALL_ENVIRONMENT_ID;
-if (!environmentId) {
-  const env = await client.beta.environments.create(environmentParams);
-  environmentId = env.id;
-  console.log(`Created environment ${env.id}`);
-} else {
-  console.log(`Using environment ${environmentId}`);
+export async function provisionAgent(env: NodeJS.ProcessEnv, client = new OpenAI({ apiKey: env.OPENAI_API_KEY })) {
+  if (!env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is required.');
+  await client.models.retrieve(AGENT_MODEL);
+  await client.beta.agents.sessions.list({ limit: 1 });
+  const agent = env.PITWALL_OPENAI_AGENT_ID
+    ? await client.beta.agents.update(env.PITWALL_OPENAI_AGENT_ID, agentParams)
+    : await client.beta.agents.create(agentParams);
+  return { agentId: agent.id };
 }
 
-const existing = process.env.PITWALL_AGENT_ID;
-const agent = existing
-  ? await client.beta.agents.update(existing, agentParams) // same agent, new version if anything changed
-  : await client.beta.agents.create(agentParams);
-console.log(`${existing ? 'Updated' : 'Created'} agent ${agent.id} (version ${agent.version})`);
-
-console.log(`
-Set these on the Railway game service (if not already set):
-  PITWALL_ENVIRONMENT_ID=${environmentId}
-  PITWALL_AGENT_ID=${agent.id}`);
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const ids = await provisionAgent(process.env);
+  console.log(`Set on Railway game (production):\nPITWALL_OPENAI_AGENT_ID=${ids.agentId}\nAlso set OPENAI_API_KEY and retain PITWALL_GITHUB_TOKEN in Railway's secret manager.`);
+}

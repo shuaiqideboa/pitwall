@@ -1,6 +1,10 @@
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
+import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
+import { DEFAULT_REPO_URL, environmentParams, validateRepoUrl } from './definition';
+import { githubPublisher } from './github';
 import type { Db } from '../db';
-import { REPO_PATH, requestMessage } from './prompt';
+import { requestMessage } from './prompt';
 
 // Takes requests off the queue one at a time and hands each to the one Pit
 // Wall agent. Players don't wait: they read the reply on their next visit.
@@ -131,112 +135,154 @@ export const testBackend: AgentBackend = {
 export interface ManagedConfig {
   apiKey: string;
   agentId: string;
-  environmentId: string;
-  /** Vaults with the agent's credentials (e.g. the GitHub MCP token). */
-  vaultIds: string[];
+  githubToken: string;
   repoUrl: string;
-  /** Token for cloning and pushing the repo; it goes through Anthropic's git proxy, never into the sandbox. */
-  repoToken?: string;
-  /** Hard spend cap per agent session, in US cents. */
+  /** Hard spend cap per persistent session, in USD cents. Never reset automatically. */
   sessionBudgetCents?: number;
 }
 
-/** The agent's settings from the environment, or null to run in test mode. */
+/** Production must fail visibly on missing configuration instead of acknowledging fake work. */
 export function configFromEnv(env: NodeJS.ProcessEnv): ManagedConfig | null {
-  const apiKey = env.claude_api_key ?? env.ANTHROPIC_API_KEY;
-  if (!apiKey || !env.PITWALL_AGENT_ID || !env.PITWALL_ENVIRONMENT_ID) return null;
+  const apiKey = env.OPENAI_API_KEY?.trim();
+  const agentId = env.PITWALL_OPENAI_AGENT_ID?.trim();
+  const githubToken = env.PITWALL_GITHUB_TOKEN?.trim();
+  if (!agentId && env.NODE_ENV !== 'production') return null;
+  if (!apiKey || !agentId || !githubToken) {
+    throw new Error('Configure OPENAI_API_KEY, PITWALL_OPENAI_AGENT_ID and PITWALL_GITHUB_TOKEN (run npm run agent:setup).');
+  }
+  const budget = env.PITWALL_SESSION_BUDGET_CENTS;
+  const sessionBudgetCents = budget ? Number(budget) : undefined;
+  if (sessionBudgetCents !== undefined && (!Number.isSafeInteger(sessionBudgetCents) || sessionBudgetCents <= 0)) {
+    throw new Error('PITWALL_SESSION_BUDGET_CENTS must be a positive integer.');
+  }
   return {
-    apiKey,
-    agentId: env.PITWALL_AGENT_ID,
-    environmentId: env.PITWALL_ENVIRONMENT_ID,
-    vaultIds: (env.PITWALL_VAULT_IDS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
-    repoUrl: env.PITWALL_REPO_URL ?? 'https://github.com/shuaiqideboa/pitwall',
-    repoToken: env.PITWALL_GITHUB_TOKEN,
-    sessionBudgetCents: env.PITWALL_SESSION_BUDGET_CENTS ? Number(env.PITWALL_SESSION_BUDGET_CENTS) : undefined,
+    apiKey, agentId, githubToken,
+    repoUrl: validateRepoUrl(env.PITWALL_REPO_URL ?? DEFAULT_REPO_URL),
+    sessionBudgetCents,
   };
 }
 
-/** A request should never take longer than this; then it counts as failed. */
 const REQUEST_DEADLINE_MS = 45 * 60 * 1000;
+/** Separate namespace: an Anthropic session ID must never be sent to OpenAI. */
+export const OPENAI_SESSION_KEY = 'openai_session_id';
 
-/**
- * The real agent: one long-running Managed Agents session for every request
- * (the session id is kept in the database). Each request is one user
- * message; the turn ends when the session goes idle.
- */
-export function managedBackend(db: Db, config: ManagedConfig, log: (m: string) => void = console.log): AgentBackend {
-  const client = new Anthropic({ apiKey: config.apiKey });
+type Sessions = OpenAI['beta']['agents']['sessions'];
+export interface ManagedOptions {
+  sessions?: Sessions;
+  deadlineMs?: number;
+}
 
-  async function sessionId(): Promise<string> {
-    const { rows } = await db.query<{ value: string }>(`SELECT value FROM agent_state WHERE key = 'session_id'`);
-    if (rows[0]) {
-      const existing = await client.beta.sessions.retrieve(rows[0].value).catch(() => null);
-      if (existing && existing.status !== 'terminated') return existing.id;
+/** One durable OpenAI Agents session; the SDK subscribes before sending each turn. */
+export function managedBackend(
+  db: Db,
+  config: ManagedConfig,
+  log: (m: string) => void = console.log,
+  options: ManagedOptions = {},
+): AgentBackend {
+  const sessions = options.sessions ?? new OpenAI({ apiKey: config.apiKey, timeout: 30_000, maxRetries: 2 }).beta.agents.sessions;
+
+  // Closing an SSE stream does not stop remote execution. Wait for cancellation
+  // before allowing the next queued request to use this session.
+  async function cancelAndWait(id: string) {
+    await sessions.events.create(id, { events: [{ type: 'agent.session.input.cancel' }] }, { timeout: 10_000 });
+    const stopAt = Date.now() + 30_000;
+    while (Date.now() < stopAt) {
+      const session = await sessions.retrieve(id, { timeout: 10_000 });
+      if (session.status === 'idle' || session.status === 'failed') return;
+      await delay(250);
     }
-    const session = await client.beta.sessions.create({
-      agent: config.agentId,
-      environment_id: config.environmentId,
-      title: 'Pit Wall: player requests',
-      vault_ids: config.vaultIds,
-      resources: config.repoToken
-        ? [
-            {
-              type: 'github_repository',
-              url: config.repoUrl,
-              mount_path: REPO_PATH,
-              authorization_token: config.repoToken,
-              checkout: { type: 'branch', name: 'main' },
-            },
-          ]
-        : [],
-      ...(config.sessionBudgetCents
-        ? { budget: { type: 'limit', max_list_cost: { amount: String(config.sessionBudgetCents), currency: 'USD' } } }
-        : {}),
+    throw new Error('OpenAI turn cancellation is still pending; session cannot accept another request.');
+  }
+
+  async function sessionId(signal: AbortSignal): Promise<string> {
+    const { rows } = await db.query<{ value: string }>(`SELECT value FROM agent_state WHERE key = $1`, [OPENAI_SESSION_KEY]);
+    if (rows[0]) {
+      const existing = await sessions.retrieve(rows[0].value, { signal }).catch((err: unknown) => {
+        if (err instanceof OpenAI.APIError && err.status === 404) return null;
+        throw err; // A transient outage or auth failure must not create another billed session.
+      });
+      if (existing) {
+        if (existing.status === 'failed') throw new Error('OpenAI session failed; inspect it before replacing the saved session.');
+        if (existing.status !== 'idle') {
+          log('agent: cancelling interrupted OpenAI turn before retrying queued work');
+          await cancelAndWait(existing.id);
+        }
+        return existing.id;
+      }
+    }
+    const session = await sessions.create({
+      agent_id: config.agentId,
+      environment: environmentParams(config.repoUrl),
+      metadata: { application: 'pitwall' },
+      ...(config.sessionBudgetCents ? { spend_control: { limit: config.sessionBudgetCents } } : {}),
+    }, { signal, maxRetries: 0 }).catch((err: unknown) => {
+      if (config.sessionBudgetCents && err instanceof OpenAI.BadRequestError && err.param === 'spend_control') {
+        throw new Error('This OpenAI project does not accept spend_control. The configured session budget cannot be enforced; refusing to create an unlimited session.');
+      }
+      throw err;
     });
     await db.query(
-      `INSERT INTO agent_state (key, value) VALUES ('session_id', $1)
+      `INSERT INTO agent_state (key, value) VALUES ($1, $2)
        ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
-      [session.id],
+      [OPENAI_SESSION_KEY, session.id],
     );
-    log(`agent: started session ${session.id}`);
+    log(`agent: started OpenAI session ${session.id}`);
     return session.id;
   }
 
   return {
     mode: 'managed',
     async handle(request, reply) {
-      const id = await sessionId();
-      const answered = new Set<string>();
-      const deadline = Date.now() + REQUEST_DEADLINE_MS;
-
-      // Stream first, then send, so no event is missed.
-      const stream = await client.beta.sessions.events.stream(id);
-      await client.beta.sessions.events.send(id, {
-        events: [{ type: 'user.message', content: [{ type: 'text', text: requestMessage(request) }] }],
-      });
-
-      for await (const event of stream) {
-        if (Date.now() > deadline) throw new Error('took too long');
-        if (event.type === 'agent.custom_tool_use' && !answered.has(event.id)) {
-          answered.add(event.id);
-          const result =
-            event.name === 'reply_to_player' ? await reply(event.input as ReplyInput) : `Unknown tool ${event.name}.`;
-          await client.beta.sessions.events.send(id, {
-            events: [{ type: 'user.custom_tool_result', custom_tool_use_id: event.id, content: [{ type: 'text', text: result }] }],
-          });
-        } else if ((event.type === 'agent.tool_use' || event.type === 'agent.mcp_tool_use') && event.evaluated_permission === 'ask') {
-          // Nobody is watching to approve risky calls: deny them, as the docs advise for unattended runs.
-          log(`agent: denied a call that needed approval (${event.name})`);
-          await client.beta.sessions.events.send(id, {
-            events: [{ type: 'user.tool_confirmation', tool_use_id: event.id, result: 'deny' }],
-          });
-        } else if (event.type === 'session.status_idle' && event.stop_reason.type !== 'requires_action') {
-          if (event.stop_reason.type === 'budget_reached') log('agent: session budget reached');
-          return;
-        } else if (event.type === 'session.status_terminated') {
-          await db.query(`DELETE FROM agent_state WHERE key = 'session_id'`);
-          throw new Error('session ended');
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(new Error('OpenAI request deadline exceeded')), options.deadlineMs ?? REQUEST_DEADLINE_MS);
+      let id: string | undefined;
+      try {
+        id = await sessionId(controller.signal);
+        const github = githubPublisher(config.repoUrl, config.githubToken, request.id, controller.signal);
+        const toolResult = async (action: () => Promise<unknown>) => {
+          try { return await action(); }
+          catch (err) { return { error: (err as Error).message }; }
+        };
+        const stream = sessions.stream(id, {
+          input: requestMessage(request),
+          // SDK retries reuse this key; a deliberate retry after cancellation starts a new turn.
+          idempotencyKey: `pitwall-${request.id}-${randomUUID()}`,
+          toolHandlers: {
+            reply_to_player: async (input) => {
+              if (input.status === 'pr_open') {
+                const pr = await github.lookup({ request_id: request.id });
+                if (pr.state !== 'open' || !('pr_url' in pr) || input.pr_url !== pr.pr_url) return 'pr_url must be the current request’s real open PR. Call submit_pull_request first.';
+              }
+              return reply(input as ReplyInput);
+            },
+            get_request_pull_request: (input) => toolResult(() => github.lookup(input)),
+            submit_pull_request: (input) => toolResult(() => github.submit(input)),
+          },
+        }, { signal: controller.signal });
+        try {
+          for await (const event of stream) {
+            if (event.type === 'agent.session.turn.failed' && event.turn.subagent_id === null) {
+              throw new Error(`OpenAI turn failed: ${event.turn.error?.message ?? 'unknown error'}`);
+            }
+            if (event.type === 'agent.session.turn.cancelled' && event.turn.subagent_id === null) {
+              throw new Error('OpenAI turn was cancelled');
+            }
+            if (event.type === 'agent.session.failed' || event.type === 'agent.session.environment.failed' || event.type === 'error') {
+              throw new Error(`OpenAI lifecycle failure: ${event.type}`);
+            }
+            // No browser/approval workflows are configured for this unattended worker.
+            if (event.type === 'agent.session.requires_action' && event.session.required_actions.some((a) => a.type !== 'function_call')) {
+              throw new Error('OpenAI requested an unsupported interactive action');
+            }
+          }
+        } finally {
+          stream.abort();
         }
+      } catch (err) {
+        if (id) await cancelAndWait(id).catch(() => log('agent: OpenAI cancellation pending; saved session retained for recovery'));
+        throw err;
+      } finally {
+        clearTimeout(timeout);
       }
     },
   };
