@@ -58,10 +58,9 @@ flowchart LR
     PG[("Postgres<br/>users · sessions · requests<br/>votes · agent_state")]
   end
 
-  subgraph Anthropic["Claude Managed Agents"]
-    S["Session (one, long-running)<br/>claude-opus-5-5"]
+  subgraph OpenAI["OpenAI Agents API"]
+    S["Session (one, long-running)<br/>gpt-6-astra"]
     SB["Cloud sandbox<br/>repo checkout · bash · npm"]
-    V["Vault<br/>GitHub MCP token"]
   end
 
   GH["GitHub<br/>repo · PRs · Actions CI"]
@@ -70,14 +69,14 @@ flowchart LR
   UI -- "JSON, cookie session" --> API
   API --> PG
   API -- "wake()" --> W
-  W -- "user.message / custom_tool_result" --> S
+  W -- "session input / function result" --> S
   S -- "SSE events: reply_to_player" --> W
   W --> PG
   S --- SB
-  SB -- "git push (via Anthropic git proxy)" --> GH
-  S -- "GitHub MCP: create_pull_request" --> GH
-  V -.-> S
-  GH -- "CI: typecheck · build · 66 tests" --> GH
+  SB -- "public clone + fetch" --> GH
+  S -- "submit_pull_request function" --> W
+  W -- "GitHub REST: branch + PR" --> GH
+  GH -- "CI: typecheck · build · tests" --> GH
   DEV -- "merge + railway up" --> GH
 ```
 
@@ -93,9 +92,9 @@ queued ──▶ working ──▶ pr_open ──▶ merged     (shown on Commun
 
 ### Agent worker (`server/agent/worker.ts`)
 
-- **One agent, one session, for every player.** The session id is stored in `agent_state`. If the session is terminated, the next request creates a new one. A single agent sees every request, so it can spot duplicates and fold related ideas together without coordinating several agents.
-- **Async queue in Postgres.** `wake()` is idempotent and is called on every new request. `drain()` claims the oldest `queued` row atomically (`UPDATE … WHERE id = (SELECT … LIMIT 1) RETURNING`) and hands it to the session as a `user.message`. On boot, `recover()` puts `working` rows back in the queue.
-- **Stream first, then send.** The worker opens the SSE event stream *before* sending the message so no event is missed. It ends the turn on `session.status_idle` (unless `requires_action`) and enforces a 45-minute deadline per request.
+- **One agent, one session, for every player.** The session id is stored in `agent_state` under `openai_session_id`, separate from the previous Claude session. Only a confirmed deleted session (HTTP 404) is recreated automatically. Authentication, network and failed-session errors never silently allocate another billed session. A single agent sees every request, so it can spot duplicates and fold related ideas together without coordinating several agents.
+- **Async queue in Postgres.** `wake()` is idempotent and is called on every new request. `drain()` claims the oldest `queued` row atomically (`UPDATE … WHERE id = (SELECT … LIMIT 1) RETURNING`) and hands it to the session as input. On boot, `recover()` puts `working` rows back in the queue. Run one game server replica: the shared agent session needs a single input writer.
+- **Stream first, then send.** The OpenAI SDK subscribes before sending input and follows the root turn until it finishes and the session is idle. A 45-minute deadline also covers a stalled stream. Closing SSE alone does not stop remote execution, so errors trigger explicit cancellation. After a restart, an interrupted remote turn is cancelled before the requeued request is retried. The prompt checks for an existing request PR and preserves branch work to avoid duplicate PRs. Server publishing reuses existing PRs and never force-updates a branch.
 - **Structured outcome via a custom tool.** The agent must finish each request by calling `reply_to_player({request_id, status, message, pr_url})`. The server validates it before storing:
   - the id must be the current request;
   - the status must be `pr_open`, `answered` or `declined`;
@@ -103,25 +102,29 @@ queued ──▶ working ──▶ pr_open ──▶ merged     (shown on Commun
   - for `pr_open`, the PR URL must match `github.com/<owner>/<repo>/pull/<n>`.
 
   If validation fails, the problem goes back to the agent as the tool result so it can correct itself. A turn that never replies is marked `failed`.
-- **Unattended means deny.** Any tool call whose evaluated permission is `ask` is answered with `deny`, because no human is watching the session.
-- **Test backend.** Without agent credentials (local dev, CI), `testBackend` acknowledges requests, so the whole flow runs end to end with no API key.
+- **Unattended operation.** Function calls are handled by the worker; any other interactive action fails the request and triggers cancellation.
+- **Test backend.** Without an OpenAI agent ID in local dev or CI, `testBackend` acknowledges requests. Production requires the OpenAI key, agent ID and server-side GitHub token, and fails startup if any are missing.
 
 ### Agent definition (`server/agent/definition.ts`, `prompt.ts`)
 
-The agent and its sandbox are versioned in code as typed SDK params. `npm run agent:setup` creates them or updates them in place.
+The agent and its sandbox are defined in code as typed OpenAI SDK params. `npm run agent:setup` creates the saved agent, or updates the supplied agent ID. It never reads or uploads GitHub credentials. Sessions copy the saved agent configuration when created; updating the saved agent does not alter an existing session.
 
 | Concern | Setting |
 | --- | --- |
-| Model | `claude-opus-5-5`, effort `high` |
-| Tools | Agent toolset (bash, files) with `auto` permissions; **web search/fetch disabled** |
-| GitHub | Remote MCP server, allow-listed to `create_pull_request`, `list_pull_requests` and `get_pull_request` only. No merge, delete or settings tools. Token held in a Managed Agents **vault** |
-| Repo | Mounted at `/workspace/pitwall` as a `github_repository` resource. The push token goes through Anthropic's git proxy and never enters the sandbox |
-| Network | `limited`: package managers, MCP servers, `github.com` and `api.github.com` only |
-| Spend | Optional per-session budget cap (`PITWALL_SESSION_BUDGET_CENTS`) |
+| Model | `gpt-6-astra`, effort `high` |
+| Tools | OpenAI-hosted shell and files; web search disabled; `get_request_pull_request`, `submit_pull_request` and `reply_to_player` functions; multi-agent execution disabled |
+| GitHub | Railway owns the token and calls GitHub REST directly. The model can request a PR only for the current player request, in the configured repo. No merge, force-push, settings or arbitrary API tool |
+| Repo | Public checkout at `/workspace/pitwall`, without credentials. The model submits full UTF-8 file contents; Railway creates Git trees, a commit, a request branch and the PR |
+| Network | Sandbox restricted to `github.com`, `api.github.com` and `registry.npmjs.org` |
+| Spend | Optional per-session USD-cent cap (`PITWALL_SESSION_BUDGET_CENTS`); an exhausted or failed session is not automatically replaced |
+
+The sandbox receives no GitHub token, vault or authenticated MCP connection. `server/agent/github.ts` validates request ownership, paths, duplicate files, payload size and the tested base SHA before publishing. Only UTF-8 files under `src/` and `public/` are accepted, excluding account code; dependency manifests, server code and CI are blocked. Maximum 30 files and 1 MiB per submission. If main moved, the agent must fetch and retest. GitHub CI and human review still gate merging. This checkout setup currently requires a public repository.
+
+Budget compatibility: the current project returned HTTP 400 for `spend_control` during the migration smoke test (2026-11-11), despite its presence in the SDK/API reference. Leaving `PITWALL_SESSION_BUDGET_CENTS` unset sends no session cap. If a cap is configured and the API rejects it, the worker fails the request and never retries without the cap. The 45-minute deadline is a time limit, not a dollar limit.
 
 **The system prompt is the product policy.** It defines:
 - **Scope:** Pitwall only. It declines unrelated work, pay-to-win changes, and anything touching accounts, secrets, CI or deployment.
-- **Process:** branch `pitwall/request-<id>` from `origin/main`, make the smallest change (prefer `config.ts` within `CONFIG_RULES`), `npm test` + `npm run build` must pass, never push to main, never touch `.github/` or `server/`.
+- **Process:** work from `origin/main`, make the smallest change (prefer `config.ts` within `CONFIG_RULES`), `npm test` + `npm run build` must pass, then submit file contents to the server, which creates `pitwall/request-<id>` and opens the PR. Never touch `.github/`, `server/`, dependencies or account code.
 - **PR format for a busy developer:** *Requested by · What changed · Effect (before/after numbers) · Risk · Checks · Recommendation*.
 
 **Prompt injection:** player text is wrapped in a `<player_request>` block. Closing tags are stripped, and the system prompt treats the text as data describing a wish, never as instructions.
@@ -138,7 +141,7 @@ The agent can only propose changes. Each layer below limits what it can break:
    - a seat wins outside 15–35%.
 
    The agent uses the same simulation to measure the effect it reports in the PR.
-3. **CI on every PR** (GitHub Actions): `npm ci`, `tsc -b`, `vite build`, the server bundle, and 66 tests.
+3. **CI on every PR** (GitHub Actions): `npm ci`, `tsc -b`, `vite build`, the server bundle, and the full test suite.
 4. **Protected `main`.** A PR and a green `build` check are required, enforced for admins too. No force-push, no deletion.
 5. **A human approval and a manual deploy.** Nothing reaches players until the developer approves.
 
@@ -190,32 +193,43 @@ npm run dev:server   # API on :8787 (second terminal), embedded Postgres in .dat
 npm test             # rules, API, worker, community, 3,000-race balance simulation
 ```
 
-Production build (the same as the Docker image):
+Build the same bundles as the Docker image:
 
 ```bash
-npm run build && npm start   # http://localhost:8787, uses DATABASE_URL when set
+npm run build
+npm start   # production: requires OpenAI configuration below; uses DATABASE_URL when set
 ```
 
-Without agent variables the Pit Wall runs in **test mode**: requests are acknowledged but not built. To run the real agent:
+In local development, without an OpenAI agent ID, Pit Wall runs in **test mode**: requests are acknowledged but not built. Production never falls back to test mode. To run the real agent:
 
 | Variable | What |
 | --- | --- |
-| `ANTHROPIC_API_KEY` | Claude API key |
-| `PITWALL_AGENT_ID` · `PITWALL_ENVIRONMENT_ID` | Printed by `npm run agent:setup` |
-| `PITWALL_VAULT_IDS` | Vault(s) holding the GitHub MCP credential |
-| `PITWALL_GITHUB_TOKEN` | Fine-grained token (contents + pull requests on this repo) for the repo mount |
+| `OPENAI_API_KEY` | OpenAI project key with Agents API, hosted-environment and `gpt-6-astra` access |
+| `PITWALL_OPENAI_AGENT_ID` | Printed by `npm run agent:setup`; required at runtime |
+| `PITWALL_GITHUB_TOKEN` | Runtime only, held by Railway: fine-grained token with contents + pull requests write on this repo. Sent directly to GitHub, never to OpenAI |
 | `PITWALL_REPO_URL` | Defaults to this repo |
 | `PITWALL_SESSION_BUDGET_CENTS` | Optional spend cap per session |
 | `DATABASE_URL` | Postgres; omit to use embedded PGlite |
+
+### Provision and deploy
+
+1. Supply `OPENAI_API_KEY` through your secret manager and run `npm run agent:setup`. No GitHub token or model turn is involved. On subsequent setup runs, supply the printed agent ID to update that resource.
+2. Set `OPENAI_API_KEY` and `PITWALL_OPENAI_AGENT_ID` on Railway's `game` service in `production`, and retain its existing `PITWALL_GITHUB_TOKEN`. Optionally set the session budget before the first request, subject to the API compatibility note above.
+3. Run `npm test` and `npm run build`. Deploy the reviewed commit using the existing Dockerfile and Railway CLI, then verify startup logs identify `OpenAI Agents API, gpt-6-astra` and send an end-to-end request to check the reply/PR flow.
+
+Claude conversation history is not imported. The old `agent_state.session_id` and previous Claude environment variables are not read by the new backend. Preserve them until rollout is verified so the previous Docker deployment can be restored if necessary. Before switching, let the Claude queue finish and confirm its remote session is idle; deploying a new worker does not cancel work already running at Anthropic.
+
+To change the model or prompt for an existing OpenAI session, explicitly update that session through the Agents API. Do not clear `openai_session_id` merely to work around a spending limit or transient error. See [session configuration](https://developers.openai.com/api/docs/guides/agents-api/configuration) and [function tools](https://developers.openai.com/api/docs/guides/agents-api/tools/functions).
 
 ## Repository map
 
 | Path | What |
 | --- | --- |
 | `server/agent/prompt.ts` | The agent's system prompt (product policy) and the `reply_to_player` tool |
-| `server/agent/definition.ts` | Agent + sandbox definition (model, tools, MCP allow-list, network) |
+| `server/agent/definition.ts` | Agent + sandbox definition (model, function tools, network) |
 | `server/agent/setup.ts` | `npm run agent:setup`: create or update the agent |
 | `server/agent/worker.ts` | Queue, session streaming, reply validation, test backend |
+| `server/agent/github.ts` | Server-side GitHub authentication and validated PR publishing |
 | `server/app.ts` | HTTP API: accounts, requests, community, votes |
 | `server/db.ts` | Postgres / PGlite connection and migrations |
 | `src/game/config.ts` | Every tunable number and its allowed range |
@@ -234,4 +248,4 @@ Without agent variables the Pit Wall runs in **test mode**: requests are acknowl
 
 ## Built with
 
-[Claude Managed Agents](https://docs.anthropic.com) (Claude Opus 5.5) · TypeScript · React · Vite · Hono · Postgres / PGlite · Vitest · GitHub Actions · Railway · Docker. Built with Claude Code.
+[OpenAI Agents API](https://developers.openai.com/api/docs/guides/agents-api) (GPT-6 Astra) · TypeScript · React · Vite · Hono · Postgres / PGlite · Vitest · GitHub Actions · Railway · Docker. Originally built with Claude Code.

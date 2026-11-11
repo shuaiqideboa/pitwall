@@ -9,11 +9,11 @@ import { connect, migrate } from './db';
 const production = process.env.NODE_ENV === 'production';
 const port = Number(process.env.PORT ?? 8787);
 
+// Validate before opening the database. Production must have a real agent.
+const agentConfig = configFromEnv(process.env);
 const db = await connect({ url: process.env.DATABASE_URL, dataDir: process.env.DATABASE_URL ? undefined : '.data/pglite' });
 await migrate(db);
 
-// The Pit Wall agent: real when its ids and key are configured, otherwise test mode.
-const agentConfig = configFromEnv(process.env);
 const worker = new AgentWorker(db, agentConfig ? managedBackend(db, agentConfig) : testBackend);
 await worker.recover();
 worker.wake(); // pick up anything queued while the server was down
@@ -27,5 +27,5 @@ app.get('*', (c) =>
 
 serve({ fetch: app.fetch, port }, () => {
   console.log(`Pitwall server on http://localhost:${port} (${process.env.DATABASE_URL ? 'Postgres' : 'local embedded Postgres'})`);
-  console.log(`Pit Wall agent: ${agentConfig ? 'managed (Claude Managed Agents)' : 'test mode (no agent configured)'}`);
+  console.log(`Pit Wall agent: ${agentConfig ? 'managed (OpenAI Agents API, gpt-6-astra)' : 'test mode (no agent configured)'}`);
 });

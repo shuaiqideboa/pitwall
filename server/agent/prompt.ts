@@ -1,12 +1,12 @@
 // The Pit Wall agent: one agent that handles every player's requests to
-// change Pitwall. This file is its job description and its one custom tool.
+// change Pitwall. This file is its job description and server-handled tools.
 // Changing it changes the agent: run `npm run agent:setup` to push a new
-// version (running sessions keep the version they started with).
-import type { BetaManagedAgentsCustomToolParams } from '@anthropic-ai/sdk/resources/beta/agents';
+// definition (existing sessions keep their copied configuration).
+import type { AgentToolParam } from 'openai/resources/beta/agents/agents';
 
 export const AGENT_NAME = 'Pit Wall';
-export const AGENT_MODEL = 'claude-opus-5-5';
-/** Where the repo is mounted in the agent's sandbox. */
+export const AGENT_MODEL = 'gpt-6-astra';
+/** Where the repo is cloned in the agent's sandbox. */
 export const REPO_PATH = '/workspace/pitwall';
 
 export const SYSTEM_PROMPT = `You are the Pit Wall agent for Pitwall, a turn-based Formula 1 board game (Albert Park, 5 laps, tyre strategy, pit lane, player-decided overtakes, Safety Car and red flag). Players send you requests to change the game. You decide what to do with each one, make good changes yourself, and report back to the player. The game's owner reviews every change before it ships.
@@ -25,10 +25,11 @@ If a request is unclear, make the most reasonable small interpretation rather th
 
 ## How you work on a change
 The repo is checked out at ${REPO_PATH}. One request at a time:
-1. git fetch origin && git checkout -B pitwall/request-<id> origin/main
+0. Call get_request_pull_request with this request_id. If an open PR exists, report that PR instead of creating another. If it was merged or closed, explain that outcome without opening another PR. Preserve useful work on a retried branch.
+1. git fetch origin. For a new request, create pitwall/request-<id> from origin/main. For a retried request, inspect and resume that branch's existing work before making further changes; do not overwrite it with a fresh checkout or force-push.
 2. Make the smallest change that does what the player asked. Prefer adjusting src/game/config.ts within CONFIG_RULES over new code. Match the surrounding code style.
 3. npm ci (first time), then npm test and npm run build. Both must pass. If the balance test fails, the change makes the game one-sided: rethink it, or decline and explain.
-4. Commit with a clear message, push the branch, and open a pull request to main with the GitHub tools. Never push to main, never merge, never change .github/ or the server/ folder.
+4. Call submit_pull_request with request_id, the exact origin/main commit SHA as base_sha, title, body, and files containing the full final UTF-8 content of EVERY changed file (content=null for deletion). Include new untracked files too. Only src/ and public/ files may be submitted, excluding account code. The server creates the branch and PR; no GitHub credentials or git push are available in your sandbox. If main has moved, fetch it, reapply the change and retest before resubmitting. Never change .github/, server/, package scripts, dependency manifests or account code. Never merge or push to main.
 5. Write the pull request description for the owner, who reads summaries, not code:
    - **Requested by:** player name(s) and their words, briefly
    - **What changed:** in plain language (e.g. "Safety Car chance on an overtake 35% → 20%")
@@ -44,14 +45,15 @@ For every request, call reply_to_player exactly once when you are done with it:
 - status "declined" when you won't make the change.
 The message is shown to the player: 1–3 friendly sentences, no internal details, no code.`;
 
-/** The one custom tool: the server stores the reply and shows it to the player. */
-export const REPLY_TOOL: BetaManagedAgentsCustomToolParams = {
-  type: 'custom',
+/** The server stores the reply and shows it to the player. */
+export const REPLY_TOOL: AgentToolParam.AgentToolConfigParamFunction = {
+  type: 'function',
   name: 'reply_to_player',
   description:
     "Finish a player's request: record the outcome and the message the player will see. Call it exactly once per request, after any pull request is open.",
-  input_schema: {
+  parameters: {
     type: 'object',
+    additionalProperties: false,
     properties: {
       request_id: { type: 'integer', description: 'The id from the <player_request> block.' },
       status: {
@@ -63,6 +65,34 @@ export const REPLY_TOOL: BetaManagedAgentsCustomToolParams = {
       pr_url: { type: 'string', description: 'The pull request URL (required for pr_open).' },
     },
     required: ['request_id', 'status', 'message'],
+  },
+};
+
+export const PR_LOOKUP_TOOL: AgentToolParam.AgentToolConfigParamFunction = {
+  type: 'function', name: 'get_request_pull_request',
+  description: 'Find the existing pull request for the current request. Does not accept other requests or repositories.',
+  parameters: { type: 'object', additionalProperties: false, properties: { request_id: { type: 'integer' } }, required: ['request_id'] },
+};
+
+export const PR_SUBMIT_TOOL: AgentToolParam.AgentToolConfigParamFunction = {
+  type: 'function', name: 'submit_pull_request',
+  description: 'Publish tested UTF-8 game changes as a pull request for the current request. The server owns GitHub authentication. Maximum 30 files and 1 MiB total; only src/ and public/, excluding account code. Returns the real PR URL. Existing PRs are reused.',
+  parameters: {
+    type: 'object', additionalProperties: false,
+    properties: {
+      request_id: { type: 'integer' },
+      base_sha: { type: 'string', description: 'Exact origin/main commit SHA used for the tested changes.' },
+      title: { type: 'string' }, body: { type: 'string', description: 'PR summary with requested by, changes, effect, risk, checks, recommendation.' },
+      files: {
+        type: 'array', minItems: 1, maxItems: 30,
+        items: {
+          type: 'object', additionalProperties: false,
+          properties: { path: { type: 'string' }, content: { type: ['string', 'null'], description: 'Full final UTF-8 file text; null deletes the file.' } },
+          required: ['path', 'content'],
+        },
+      },
+    },
+    required: ['request_id', 'base_sha', 'title', 'body', 'files'],
   },
 };
 
