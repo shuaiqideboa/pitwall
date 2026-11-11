@@ -41,35 +41,22 @@ const myRequests = async (cookie: string) =>
     .requests;
 
 describe('player requests', () => {
-  it('needs a signed-in player', async () => {
+  it('requires sign-in and a request of the allowed length', async () => {
     expect((await post('/api/requests', { text: 'Make the Safety Car rarer please' })).status).toBe(401);
     expect((await app.request('/api/requests')).status).toBe(401);
-  });
-
-  it('checks the length of the request', async () => {
     const cookie = await signUp();
     expect((await post('/api/requests', { text: 'short' }, cookie)).status).toBe(400);
     expect((await post('/api/requests', { text: 'x'.repeat(2001) }, cookie)).status).toBe(400);
   });
 
-  it('queues the request and the agent answers it', async () => {
-    const cookie = await signUp();
-    const res = await post('/api/requests', { text: 'Make the Safety Car come out less often' }, cookie);
-    expect(res.status).toBe(201);
-    await worker.idle();
-    const [request] = await myRequests(cookie);
-    expect(request).toMatchObject({ text: 'Make the Safety Car come out less often', status: 'answered' });
-    expect(request.reply).toMatch(/test mode/);
-  });
-
-  it('shows each player only their own requests', async () => {
+  it('queues and answers requests while keeping each player’s history private', async () => {
     const alice = await signUp('Alice');
     const bob = await signUp('Bob');
-    await post('/api/requests', { text: 'Alice wants faster pit stops' }, alice);
-    await post('/api/requests', { text: 'Bob wants a rain mode please' }, bob);
+    expect((await post('/api/requests', { text: 'Alice wants faster pit stops' }, alice)).status).toBe(201);
+    expect((await post('/api/requests', { text: 'Bob wants a rain mode please' }, bob)).status).toBe(201);
     await worker.idle();
-    expect((await myRequests(alice)).map((r) => r.text)).toEqual(['Alice wants faster pit stops']);
-    expect((await myRequests(bob)).map((r) => r.text)).toEqual(['Bob wants a rain mode please']);
+    expect(await myRequests(alice)).toEqual([expect.objectContaining({ text: 'Alice wants faster pit stops', status: 'answered', reply: expect.stringMatching(/test mode/) })]);
+    expect(await myRequests(bob)).toEqual([expect.objectContaining({ text: 'Bob wants a rain mode please', status: 'answered', reply: expect.stringMatching(/test mode/) })]);
   });
 
   it(`limits each player to ${DAILY_REQUEST_LIMIT} requests a day`, async () => {
@@ -129,26 +116,22 @@ describe('the agent worker', () => {
     expect(request).toMatchObject({ status: 'pr_open', pr_url: 'https://github.com/o/r/pull/7' });
   });
 
-  it('marks a request failed if the agent crashes, and moves on', async () => {
+  it('marks crashes and missing replies failed, then continues processing the queue', async () => {
     let calls = 0;
     setup({
       mode: 'test',
       async handle(req, reply) {
         if (++calls === 1) throw new Error('boom');
+        if (calls === 2) return;
         await reply({ request_id: req.id, status: 'answered', message: 'All good.' });
       },
     });
-    const [first, second] = await queue('This one will crash the agent', 'This one will work fine');
+    const [first, silent, next] = await queue('This one will crash the agent', 'The agent forgets to reply', 'This one will work fine');
     expect(first.status).toBe('failed');
     expect(first.reply).toMatch(/something went wrong/);
-    expect(second.status).toBe('answered');
+    expect(silent.status).toBe('failed');
+    expect(next.status).toBe('answered');
     expect(logs.some((l) => l.includes('boom'))).toBe(true);
-  });
-
-  it('marks a request failed if the agent never reports back', async () => {
-    setup({ mode: 'test', async handle() {} });
-    const [request] = await queue('The agent forgets to reply to this');
-    expect(request.status).toBe('failed');
   });
 
   it('puts interrupted work back in the queue after a restart', async () => {
