@@ -4,7 +4,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { DEFAULT_REPO_URL, environmentParams, validateRepoUrl } from './definition';
 import { githubPublisher } from './github';
 import type { Db } from '../db';
-import { requestMessage } from './prompt';
+import { AGENT_MODEL, requestMessage } from './prompt';
+import { declineMessage, policyGuard, type PolicyGuard } from './policy';
 
 // Takes requests off the queue one at a time and hands each to the one Pit
 // Wall agent. Players don't wait: they read the reply on their next visit.
@@ -170,6 +171,7 @@ type Sessions = OpenAI['beta']['agents']['sessions'];
 export interface ManagedOptions {
   sessions?: Sessions;
   deadlineMs?: number;
+  policy?: PolicyGuard;
 }
 
 /** One durable OpenAI Agents session; the SDK subscribes before sending each turn. */
@@ -179,7 +181,9 @@ export function managedBackend(
   log: (m: string) => void = console.log,
   options: ManagedOptions = {},
 ): AgentBackend {
-  const sessions = options.sessions ?? new OpenAI({ apiKey: config.apiKey, timeout: 30_000, maxRetries: 2 }).beta.agents.sessions;
+  const client = new OpenAI({ apiKey: config.apiKey, timeout: 30_000, maxRetries: 2 });
+  const sessions = options.sessions ?? client.beta.agents.sessions;
+  const policy = options.policy ?? policyGuard(client, AGENT_MODEL);
 
   // Closing an SSE stream does not stop remote execution. Wait for cancellation
   // before allowing the next queued request to use this session.
@@ -237,8 +241,15 @@ export function managedBackend(
       const timeout = setTimeout(() => controller.abort(new Error('OpenAI request deadline exceeded')), options.deadlineMs ?? REQUEST_DEADLINE_MS);
       let id: string | undefined;
       try {
+        const decision = await policy.request(request, controller.signal);
+        if (decision.decision !== 'allow') {
+          log(`agent: request ${request.id} declined by policy (${decision.reason})`);
+          await reply({ request_id: request.id, status: 'declined', message: declineMessage(decision.reason) });
+          return;
+        }
         id = await sessionId(controller.signal);
-        const github = githubPublisher(config.repoUrl, config.githubToken, request.id, controller.signal);
+        const github = githubPublisher(config.repoUrl, config.githubToken, request.id, controller.signal,
+          (files) => policy.changes(request, files, controller.signal));
         const toolResult = async (action: () => Promise<unknown>) => {
           try { return await action(); }
           catch (err) { return { error: (err as Error).message }; }

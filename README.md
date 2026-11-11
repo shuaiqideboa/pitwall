@@ -92,6 +92,7 @@ queued ──▶ working ──▶ pr_open ──▶ merged     (shown on Commun
 
 ### Agent worker (`server/agent/worker.ts`)
 
+- **Independent request screening.** Before the coding session is read or created, a fresh, tool-free GPT-6 Astra Responses call checks Pitwall scope, equal treatment and basic race rules. Unrelated work, guaranteed wins, rigged dice, identity-based advantages and rule bypasses receive a fixed refusal. A review error never starts the coding agent. These review calls are separate API usage from the managed session.
 - **One agent, one session, for every player.** The session id is stored in `agent_state` under `openai_session_id`, separate from the previous Claude session. Only a confirmed deleted session (HTTP 404) is recreated automatically. Authentication, network and failed-session errors never silently allocate another billed session. A single agent sees every request, so it can spot duplicates and fold related ideas together without coordinating several agents.
 - **Async queue in Postgres.** `wake()` is idempotent and is called on every new request. `drain()` claims the oldest `queued` row atomically (`UPDATE … WHERE id = (SELECT … LIMIT 1) RETURNING`) and hands it to the session as input. On boot, `recover()` puts `working` rows back in the queue. Run one game server replica: the shared agent session needs a single input writer.
 - **Stream first, then send.** The OpenAI SDK subscribes before sending input and follows the root turn until it finishes and the session is idle. A 45-minute deadline also covers a stalled stream. Closing SSE alone does not stop remote execution, so errors trigger explicit cancellation. After a restart, an interrupted remote turn is cancelled before the requeued request is retried. The prompt checks for an existing request PR and preserves branch work to avoid duplicate PRs. Server publishing reuses existing PRs and never force-updates a branch.
@@ -119,6 +120,12 @@ The agent and its sandbox are defined in code as typed OpenAI SDK params. `npm r
 | Spend | Optional per-session USD-cent cap (`PITWALL_SESSION_BUDGET_CENTS`); an exhausted or failed session is not automatically replaced |
 
 The sandbox receives no GitHub token, vault or authenticated MCP connection. `server/agent/github.ts` validates request ownership, paths, duplicate files, payload size and the tested base SHA before publishing. Only UTF-8 files under `src/` and `public/` are accepted, excluding account code; dependency manifests, server code and CI are blocked. Maximum 30 files and 1 MiB per submission. If main moved, the agent must fetch and retest. GitHub CI and human review still gate merging. This checkout setup currently requires a public repository.
+
+Before any GitHub write, the server also sends the actual base file contents and proposed contents to an independent scope/fairness review, without tools or the coding agent's conversation. A rejection, incomplete response or API error blocks publication. Review input is capped at 512 KiB including both versions; larger changes must be split. The original `src/game/engine.test.ts`, `balance.test.ts` and `config.test.ts` cannot be edited or deleted through the publishing tool. New regression tests can be added in separate files.
+
+These checks are defense in depth, not a proof that every adversarial request or unfair code change will be detected. Deterministic path restrictions, the protected rule tests, 3,000-race balance simulation, required GitHub CI and human merge approval remain necessary.
+
+Run `npm run agent:policy-eval` with `OPENAI_API_KEY` to repeat the live ten-case scope/fairness evaluation. It includes guaranteed wins, owner impersonation, unrelated tasks, core-rule removal, a hidden cheating code change, and legitimate requests. This explicitly billed check is separate from the offline test suite and makes no repository writes.
 
 Budget compatibility: the current project returned HTTP 400 for `spend_control` during the migration smoke test (2026-11-11), despite its presence in the SDK/API reference. Leaving `PITWALL_SESSION_BUDGET_CENTS` unset sends no session cap. If a cap is configured and the API rejects it, the worker fails the request and never retries without the cap. The 45-minute deadline is a time limit, not a dollar limit.
 
@@ -219,7 +226,7 @@ In local development, without an OpenAI agent ID, Pit Wall runs in **test mode**
 
 Claude conversation history is not imported. The old `agent_state.session_id` and previous Claude environment variables are not read by the new backend. Preserve them until rollout is verified so the previous Docker deployment can be restored if necessary. Before switching, let the Claude queue finish and confirm its remote session is idle; deploying a new worker does not cancel work already running at Anthropic.
 
-To change the model or prompt for an existing OpenAI session, explicitly update that session through the Agents API. Do not clear `openai_session_id` merely to work around a spending limit or transient error. See [session configuration](https://developers.openai.com/api/docs/guides/agents-api/configuration) and [function tools](https://developers.openai.com/api/docs/guides/agents-api/tools/functions).
+Existing sessions can update model/reasoning settings, but changing instructions requires a new session. For a prompt rollout, first wait for an empty queue and idle session, preserve the old ID for rollback, then create a session from the updated saved agent. Do not clear `openai_session_id` merely to work around a spending limit or transient error. The server-side request and code policy checks apply immediately to existing sessions after deployment. See [session configuration](https://developers.openai.com/api/docs/guides/agents-api/configuration) and [function tools](https://developers.openai.com/api/docs/guides/agents-api/tools/functions).
 
 ## Repository map
 
@@ -230,6 +237,7 @@ To change the model or prompt for an existing OpenAI session, explicitly update 
 | `server/agent/setup.ts` | `npm run agent:setup`: create or update the agent |
 | `server/agent/worker.ts` | Queue, session streaming, reply validation, test backend |
 | `server/agent/github.ts` | Server-side GitHub authentication and validated PR publishing |
+| `server/agent/policy.ts` | Independent Pitwall scope/fairness screening for requests and proposed code |
 | `server/app.ts` | HTTP API: accounts, requests, community, votes |
 | `server/db.ts` | Postgres / PGlite connection and migrations |
 | `src/game/config.ts` | Every tunable number and its allowed range |

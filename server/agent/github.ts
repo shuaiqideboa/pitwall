@@ -1,4 +1,5 @@
 import { validateRepoUrl } from './definition';
+import { declineMessage, type PolicyDecision, type ReviewedFile } from './policy';
 
 interface FileChange { path: string; content: string | null }
 interface Submission { request_id: number; base_sha: string; title: string; body: string; files: FileChange[] }
@@ -13,6 +14,9 @@ function validateSubmission(currentId: number, input: Record<string, unknown>): 
   const seen = new Set<string>();
   let bytes = 0;
   for (const file of input.files) {
+    if (['src/game/engine.test.ts', 'src/game/balance.test.ts', 'src/game/config.test.ts'].includes(file?.path)) {
+      throw new Error('Core rule, fairness and config tests are protected. Add new regression tests in a separate file.');
+    }
     if (!file || typeof file.path !== 'string' || !/^(src|public)\/(?:[\w-]+\/)*[\w-][\w.-]*$/.test(file.path)
       || ['src/account.ts', 'src/components/Account.tsx'].includes(file.path)) {
       throw new Error('Only src/ and public/ game files are allowed, excluding account code; no hidden paths or traversal.');
@@ -27,7 +31,8 @@ function validateSubmission(currentId: number, input: Record<string, unknown>): 
 }
 
 /** Only this server talks to GitHub with the token. No credentials or shell execution in tool results. */
-export function githubPublisher(repoUrl: string, token: string, requestId: number, signal: AbortSignal, fetcher: typeof fetch = fetch) {
+export function githubPublisher(repoUrl: string, token: string, requestId: number, signal: AbortSignal,
+  review: (files: ReviewedFile[]) => Promise<PolicyDecision>, fetcher: typeof fetch = fetch) {
   const repo = validateRepoUrl(repoUrl).slice('https://github.com/'.length).replace(/\.git$/, '');
   if (!Number.isSafeInteger(requestId) || requestId <= 0) throw new Error('Invalid request ID.');
   const branch = `pitwall/request-${requestId}`;
@@ -68,6 +73,15 @@ export function githubPublisher(repoUrl: string, token: string, requestId: numbe
       const mainRef = (await api<{ object: { sha: string } }>('git/ref/heads/main'))!;
       const main = (await api<{ sha: string; tree: { sha: string } }>(`git/commits/${mainRef.object.sha}`))!;
       if (main.sha !== submission.base_sha) throw new Error('main has moved. Fetch origin/main, reapply your changes and rerun tests/build before submitting.');
+      // Review exact base content and the submitted result, before any GitHub write.
+      const files: ReviewedFile[] = [];
+      for (const file of submission.files) {
+        const original = await api<{ type: string; encoding: string; content: string }>(`contents/${file.path}?ref=${main.sha}`, 'GET', undefined, true);
+        if (original && (original.type !== 'file' || original.encoding !== 'base64')) throw new Error('Cannot safely review the original file.');
+        files.push({ path: file.path, before: original ? Buffer.from(original.content, 'base64').toString('utf8') : null, after: file.content });
+      }
+      const decision = await review(files);
+      if (decision.decision !== 'allow') throw new Error(`Policy rejected this change: ${declineMessage(decision.reason)} Do not bypass this decision; decline the request.`);
       const tree = (await api<{ sha: string }>('git/trees', 'POST', {
         base_tree: main.tree.sha,
         tree: submission.files.map((f) => ({ path: f.path, mode: '100644', type: 'blob', ...(f.content === null ? { sha: null } : { content: f.content }) })),

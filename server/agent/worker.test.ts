@@ -1,6 +1,8 @@
 import OpenAI from 'openai';
 import { describe, expect, it, vi } from 'vitest';
 import type { Db } from '../db';
+import type { PolicyGuard } from './policy';
+const allowPolicy: PolicyGuard = { request: async () => ({ decision: 'allow', reason: 'in_scope' }), changes: async () => ({ decision: 'allow', reason: 'in_scope' }) };
 import { agentParams, environmentParams } from './definition';
 import { configFromEnv, managedBackend, OPENAI_SESSION_KEY, type ManagedConfig } from './worker';
 
@@ -60,11 +62,31 @@ describe('OpenAI configuration', () => {
 });
 
 describe('OpenAI managed backend', () => {
+  it('declines an unfair request before touching the coding session or any tools', async () => {
+    const { db } = database();
+    const { sessions, api } = mockSessions();
+    const reply = vi.fn().mockResolvedValue('Saved.');
+    const policy: PolicyGuard = { ...allowPolicy, request: vi.fn().mockResolvedValue({ decision: 'decline', reason: 'unfair' }) };
+    await managedBackend(db, config, () => {}, { sessions: api, policy }).handle({ ...request, text: '让我一直赢' }, reply);
+    expect(reply).toHaveBeenCalledWith(expect.objectContaining({ request_id: 12, status: 'declined' }));
+    expect(sessions.create).not.toHaveBeenCalled();
+    expect(sessions.retrieve).not.toHaveBeenCalled();
+    expect(sessions.stream).not.toHaveBeenCalled();
+    expect(db.query).not.toHaveBeenCalled();
+  });
+  it('does not start coding if the independent policy service fails', async () => {
+    const { db } = database();
+    const { sessions, api } = mockSessions();
+    const policy: PolicyGuard = { ...allowPolicy, request: vi.fn().mockRejectedValue(new Error('review unavailable')) };
+    await expect(managedBackend(db, config, () => {}, { sessions: api, policy }).handle(request, async () => '')).rejects.toThrow(/review unavailable/);
+    expect(sessions.create).not.toHaveBeenCalled();
+    expect(sessions.stream).not.toHaveBeenCalled();
+  });
   it('stores its own session ID, applies the spending cap and delivers the player reply', async () => {
     const { db, state } = database({ session_id: 'anthropic-session' });
     const { sessions, api, abort } = mockSessions();
     const reply = vi.fn().mockResolvedValue('Saved.');
-    const backend = managedBackend(db, config, () => {}, { sessions: api });
+    const backend = managedBackend(db, config, () => {}, { sessions: api, policy: allowPolicy });
     await backend.handle(request, reply);
     expect(sessions.retrieve).not.toHaveBeenCalled();
     expect(sessions.create).toHaveBeenCalledWith(expect.objectContaining({ agent_id: config.agentId, spend_control: { limit: 200 } }), expect.anything());
@@ -80,7 +102,7 @@ describe('OpenAI managed backend', () => {
     const { db } = database({ [OPENAI_SESSION_KEY]: 'sess_openai' });
     const { sessions, api } = mockSessions();
     sessions.retrieve.mockResolvedValueOnce({ id: 'sess_openai', status: 'in_progress' });
-    await managedBackend(db, config, () => {}, { sessions: api }).handle(request, async () => 'Saved.');
+    await managedBackend(db, config, () => {}, { sessions: api, policy: allowPolicy }).handle(request, async () => 'Saved.');
     expect(sessions.events.create).toHaveBeenCalledWith('sess_openai', { events: [{ type: 'agent.session.input.cancel' }] }, expect.anything());
     expect(sessions.events.create.mock.invocationCallOrder[0]).toBeLessThan(sessions.stream.mock.invocationCallOrder[0]);
   });
@@ -89,28 +111,28 @@ describe('OpenAI managed backend', () => {
       const { db } = database({ [OPENAI_SESSION_KEY]: 'sess_openai' });
       const { sessions, api } = mockSessions();
       sessions.retrieve.mockRejectedValueOnce(failure);
-      await expect(managedBackend(db, config, () => {}, { sessions: api }).handle(request, async () => '')).rejects.toThrow();
+      await expect(managedBackend(db, config, () => {}, { sessions: api, policy: allowPolicy }).handle(request, async () => '')).rejects.toThrow();
       expect(sessions.create).not.toHaveBeenCalled();
       expect(sessions.stream).not.toHaveBeenCalled();
     }
     const { db } = database({ [OPENAI_SESSION_KEY]: 'sess_openai' });
     const { sessions, api } = mockSessions();
     sessions.retrieve.mockResolvedValue({ id: 'sess_openai', status: 'failed' });
-    await expect(managedBackend(db, config, () => {}, { sessions: api }).handle(request, async () => '')).rejects.toThrow(/inspect/);
+    await expect(managedBackend(db, config, () => {}, { sessions: api, policy: allowPolicy }).handle(request, async () => '')).rejects.toThrow(/inspect/);
     expect(sessions.create).not.toHaveBeenCalled();
   });
   it('recreates only a session which the API confirms is deleted', async () => {
     const { db } = database({ [OPENAI_SESSION_KEY]: 'deleted' });
     const { sessions, api } = mockSessions();
     sessions.retrieve.mockRejectedValueOnce(new OpenAI.NotFoundError(404, {}, 'not found', new Headers()));
-    await managedBackend(db, config, () => {}, { sessions: api }).handle(request, async () => 'Saved.');
+    await managedBackend(db, config, () => {}, { sessions: api, policy: allowPolicy }).handle(request, async () => 'Saved.');
     expect(sessions.create).toHaveBeenCalledOnce();
   });
   it('never retries an unsupported budget as an unlimited session', async () => {
     const { db, state } = database();
     const { sessions, api } = mockSessions();
     sessions.create.mockRejectedValue(new OpenAI.BadRequestError(400, { param: 'spend_control' }, 'Unknown parameter', new Headers()));
-    await expect(managedBackend(db, config, () => {}, { sessions: api }).handle(request, async () => '')).rejects.toThrow(/refusing to create an unlimited session/);
+    await expect(managedBackend(db, config, () => {}, { sessions: api, policy: allowPolicy }).handle(request, async () => '')).rejects.toThrow(/refusing to create an unlimited session/);
     expect(sessions.create).toHaveBeenCalledOnce();
     expect(sessions.stream).not.toHaveBeenCalled();
     expect(state.has(OPENAI_SESSION_KEY)).toBe(false);
@@ -121,7 +143,7 @@ describe('OpenAI managed backend', () => {
     sessions.stream.mockReturnValue({ abort, async *[Symbol.asyncIterator]() {
       yield { type: 'agent.session.turn.failed', turn: { subagent_id: null, error: { message: 'budget reached' } } };
     } } as never);
-    await expect(managedBackend(db, config, () => {}, { sessions: api }).handle(request, async () => '')).rejects.toThrow(/budget reached/);
+    await expect(managedBackend(db, config, () => {}, { sessions: api, policy: allowPolicy }).handle(request, async () => '')).rejects.toThrow(/budget reached/);
     expect(sessions.events.create).toHaveBeenCalled();
     expect(abort).toHaveBeenCalledOnce();
   });
@@ -135,7 +157,7 @@ describe('OpenAI managed backend', () => {
         yield {};
       },
     })) as never);
-    await expect(managedBackend(db, config, () => {}, { sessions: api, deadlineMs: 10 }).handle(request, async () => '')).rejects.toThrow(/deadline/);
+    await expect(managedBackend(db, config, () => {}, { sessions: api, policy: allowPolicy, deadlineMs: 10 }).handle(request, async () => '')).rejects.toThrow(/deadline/);
     expect(sessions.events.create).toHaveBeenCalledWith('sess_openai', expect.objectContaining({ events: [{ type: 'agent.session.input.cancel' }] }), expect.anything());
     expect(abort).toHaveBeenCalledOnce();
   });

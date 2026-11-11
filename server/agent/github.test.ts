@@ -1,19 +1,47 @@
 import { describe, expect, it, vi } from 'vitest';
 import { githubPublisher } from './github';
+import type { PolicyDecision } from './policy';
 
 const base = 'a'.repeat(40);
 const input = { request_id: 12, base_sha: base, title: 'Improve lap label', body: 'Tested game change.', files: [{ path: 'src/example.ts', content: 'export const label = "Lap";\n' }] };
 const pr = { html_url: 'https://github.com/o/r/pull/8', state: 'open', merged_at: null };
 function fixture(responses: [unknown, number?][]) {
-  const fetcher = vi.fn(async () => {
+  const fetcher = vi.fn(async (url: string) => {
+    if (url.includes('/contents/')) return new Response(JSON.stringify({ type: 'file', encoding: 'base64', content: Buffer.from('export const label = "Old";\n').toString('base64') }));
     const next = responses.shift();
     if (!next) throw new Error('Unexpected request');
     return new Response(JSON.stringify(next[0]), { status: next[1] ?? 200 });
   });
-  return { fetcher, publisher: githubPublisher('https://github.com/o/r', 'private-token', 12, new AbortController().signal, fetcher) };
+  const review = vi.fn(async (): Promise<PolicyDecision> => ({ decision: 'allow', reason: 'in_scope' }));
+  return { fetcher, review, publisher: githubPublisher('https://github.com/o/r', 'private-token', 12, new AbortController().signal, review, fetcher as typeof fetch) };
 }
 
 describe('server-owned GitHub publishing', () => {
+  it('blocks edits and deletions of the existing core rule tests before review or any API call', async () => {
+    const { fetcher, review, publisher } = fixture([]);
+    for (const path of ['src/game/engine.test.ts', 'src/game/config.test.ts', 'src/game/balance.test.ts']) {
+      for (const content of [null, 'test.skip("fairness", () => {});']) {
+        await expect(publisher.submit({ ...input, files: [{ path, content }] })).rejects.toThrow(/protected/);
+      }
+    }
+    expect(review).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it('reviews exact base and proposed content and rejects unfair code before any write', async () => {
+    const { fetcher, review, publisher } = fixture([[[]], [{ object: { sha: base } }], [{ sha: base, tree: { sha: 'base-tree' } }]]);
+    review.mockResolvedValue({ decision: 'decline', reason: 'unfair' });
+    await expect(publisher.submit(input)).rejects.toThrow(/Policy rejected/);
+    expect(review).toHaveBeenCalledWith([{ path: 'src/example.ts', before: 'export const label = "Old";\n', after: input.files[0].content }]);
+    const calls = fetcher.mock.calls as unknown as [string, RequestInit][];
+    expect(calls.every(([, init]) => init.method === 'GET')).toBe(true);
+  });
+  it('fails closed on a code-review outage', async () => {
+    const { fetcher, review, publisher } = fixture([[[]], [{ object: { sha: base } }], [{ sha: base, tree: { sha: 'base-tree' } }]]);
+    review.mockRejectedValue(new Error('review unavailable'));
+    await expect(publisher.submit(input)).rejects.toThrow(/review unavailable/);
+    const calls = fetcher.mock.calls as unknown as [string, RequestInit][];
+    expect(calls.every(([, init]) => init.method === 'GET')).toBe(true);
+  });
   it('rejects other requests, protected paths, traversal, duplicate paths and large payloads before any network call', async () => {
     const { fetcher, publisher } = fixture([]);
     await expect(publisher.lookup({ request_id: 13 })).rejects.toThrow(/12/);
@@ -48,9 +76,9 @@ describe('server-owned GitHub publishing', () => {
       expect(options.redirect).toBe('error');
       expect(options.headers).toMatchObject({ Authorization: 'Bearer private-token' });
     }
-    expect(JSON.parse(calls[3][1].body as string)).toMatchObject({ base_tree: 'base-tree', tree: [{ path: 'src/example.ts', mode: '100644', type: 'blob', content: input.files[0].content }] });
-    expect(JSON.parse(calls[6][1].body as string)).toEqual({ ref: 'refs/heads/pitwall/request-12', sha: 'new-commit' });
-    expect(JSON.parse(calls[7][1].body as string)).toMatchObject({ head: 'pitwall/request-12', base: 'main' });
+    expect(JSON.parse(calls[4][1].body as string)).toMatchObject({ base_tree: 'base-tree', tree: [{ path: 'src/example.ts', mode: '100644', type: 'blob', content: input.files[0].content }] });
+    expect(JSON.parse(calls[7][1].body as string)).toEqual({ ref: 'refs/heads/pitwall/request-12', sha: 'new-commit' });
+    expect(JSON.parse(calls[8][1].body as string)).toMatchObject({ head: 'pitwall/request-12', base: 'main' });
   });
   it('recovers a branch created before a failed PR response without overwriting commits', async () => {
     const { publisher, fetcher } = fixture([[[]], [{ object: { sha: base } }], [{ sha: base, tree: { sha: 'base-tree' } }], [{ sha: 'new-tree' }], [{ object: { sha: 'existing-commit' } }], [{ tree: { sha: 'new-tree' } }], [pr]]);
@@ -61,7 +89,7 @@ describe('server-owned GitHub publishing', () => {
   it('never overwrites differing work on an existing request branch', async () => {
     const { publisher, fetcher } = fixture([[[]], [{ object: { sha: base } }], [{ sha: base, tree: { sha: 'base-tree' } }], [{ sha: 'new-tree' }], [{ object: { sha: 'existing-commit' } }], [{ tree: { sha: 'different-tree' } }]]);
     await expect(publisher.submit(input)).rejects.toThrow(/different work/);
-    expect(fetcher).toHaveBeenCalledTimes(6);
+    expect(fetcher).toHaveBeenCalledTimes(7);
   });
   it('does not expose response bodies or credentials in API failures', async () => {
     const { publisher } = fixture([[{ message: 'private-token' }, 403]]);
