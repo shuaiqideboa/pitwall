@@ -177,6 +177,19 @@ The agent can only propose changes. Each layer below limits what it can break:
 
 React 18 + TypeScript + Vite. The game engine (`src/game/engine.ts`) is a pure, deterministic state machine (`GameState → GameState`), which is what makes the 3,000-race simulation and the rule tests possible. Rendering: an SVG track built from Catmull-Rom splines, a follow camera with rAF smoothing, a 3D CSS die, and synthesized Web Audio cues.
 
+### Product film
+
+The home page's **Watch the film** entry opens *The next lap*, a 48-second English introduction. It follows player feedback through AI implementation, community voting, human approval and deployment, ending with the measured fairness improvement from [PR #9](https://github.com/shuaiqideboa/pitwall/pull/9).
+
+- `src/film/script.ts` is the shared chapter/caption timeline; `renderer.ts` generates the circuit, cars, floating UI and all typography in one Three.js canvas. Subtitles follow the measured narration timings in `narration-timing.ts`.
+- English AI narration uses seven static Cedar voice clips under `public/film/narration/`. Each clip speaks exactly its caption and starts 0.65 seconds after its chapter begins. The browser makes no speech-generation API calls.
+- `heroic-score.ts` composes an original orchestral-action score with a brass fanfare, articulated strings and cinematic percussion. `soundtrack.ts` mixes narration and music into one deterministic stereo buffer, lowering music under speech and bringing it back between lines. This is an original composition, not a licensed film soundtrack.
+- The player opens on a still frame with sound enabled. **Play** waits for the complete mix and uses the audio sample clock for the pictures, captions, pause and seeking. Chapter jumps start before the narrator's first word. It also supports fullscreen, mute and a transcript; Three.js loads only when the film opens.
+- **Save film** records a 1280×720, 30 fps video with narration and music, preferring H.264/AAC MP4 and falling back to WebM on compatible browsers. Export runs for 48 seconds; keep the tab visible. Muting preview speakers does not mute the exported mix. Closing or cancelling releases recording resources.
+- Local video exports and browser QA captures belong in ignored `output/film/` and `output/playwright/`. The home thumbnail is `public/film/pitwall-poster.jpg`, captured from the rendered film.
+
+To regenerate the voice assets manually, use the environment's `OPENAI_API_KEY` with `node --import tsx scripts/generate-film-narration.ts`, then run `python3 scripts/prepare-film-narration.py`. The second command repairs streaming WAV headers, trims only outer silence, normalizes speech levels, validates chapter fit and writes the measured cue table. Generation is an explicit development step with API usage; credentials never enter the client bundle. The current recorded assets were generated with `gpt-4o-mini-tts`/`cedar`; the generator's model may need updating after that API's retirement. Normal playback and video exports use only the checked-in audio files.
+
 ---
 
 ## The test-bed game
