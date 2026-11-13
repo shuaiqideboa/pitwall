@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { type Account, signOut } from '../account';
 import { TOTAL_LAPS } from '../game/board';
 import { MAP_VIEWBOX, TRACK_PATH } from '../game/track';
@@ -6,6 +6,9 @@ import { type Theme, applyTheme, readTheme } from '../theme';
 import { type AuthMode, AuthDialog } from './Account';
 import { Community } from './Community';
 import { PitWallChat } from './PitWallChat';
+import { FilmTeaser } from './FilmTeaser';
+
+const ProductFilm = lazy(() => import('./ProductFilm'));
 
 /** The first screen: start (or resume) the race, sign in, the Pit Wall for suggesting changes, and the community. */
 export function Home({
@@ -26,6 +29,7 @@ export function Home({
   const [auth, setAuth] = useState<AuthMode | null>(null);
   const [panel, setPanel] = useState<'pitwall' | 'community' | null>(null);
   const [theme, setTheme] = useState<Theme>(readTheme);
+  const [filmOpen, setFilmOpen] = useState(false);
   const switchTheme = () => {
     const next = theme === 'light' ? 'dark' : 'light';
     applyTheme(next);
@@ -35,6 +39,7 @@ export function Home({
 
   return (
     <main className="home" style={{ ['--accent' as string]: accent }}>
+      <div className="home__with-film">
       <section className="home__card" aria-labelledby="home-title">
         <svg className="home__track" viewBox={`${x} ${y} ${w} ${h}`} aria-hidden="true">
           <path d={TRACK_PATH} />
@@ -80,6 +85,12 @@ export function Home({
           {theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
         </button>
       </section>
+      <FilmTeaser onPlay={() => setFilmOpen(true)} />
+      </div>
+
+      {filmOpen && <Suspense fallback={<div className="film-opening" role="status">Opening the film…</div>}>
+        <ProductFilm onClose={() => setFilmOpen(false)} />
+      </Suspense>}
 
       {panel === 'pitwall' && (
         <PitWallChat account={account} onSignIn={() => setAuth('signin')} onClose={() => setPanel(null)} />

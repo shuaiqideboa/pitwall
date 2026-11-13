@@ -7,3 +7,6 @@ dist
 dist-server
 # Local embedded database
 .data/
+# Local film exports and browser verification artifacts
+output/
+.playwright-cli/
