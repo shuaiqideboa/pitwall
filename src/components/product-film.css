@@ -50,6 +50,7 @@
 .product-film__sound-hint { font: 500 8px 'Barlow', sans-serif; letter-spacing: .13em; color: #8e949d; margin-left: 10px; }
 .product-film__export { display: flex; align-items: center; gap: 8px; border: 1px solid #ffffff24; border-radius: 5px; padding: 6px 11px; background: none; color: #d2d5da; cursor: pointer; font-size: 11px; }
 .product-film__export:hover { background: #ffffff0a; border-color: #ffffff55; }
+.product-film__loop[aria-pressed="true"] { color: #a7e6d2; background: #a7e6d210; border-color: #a7e6d266; }
 .product-film__chapters { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
 .product-film__chapters > button { display: flex; gap: 6px; align-items: center; padding: 10px 0; border: none; border-top: 2px solid #ffffff16; background: none; color: #9299a3; font-size: 11px; white-space: nowrap; cursor: pointer; text-align: left; }
 .product-film__chapters > button > span { color: #5d646f; font-size: 9px; }

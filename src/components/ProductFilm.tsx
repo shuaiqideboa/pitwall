@@ -9,7 +9,7 @@ type FilmRenderer = ReturnType<typeof createFilmRenderer>;
 type Soundtrack = Awaited<ReturnType<typeof createFilmSoundtrack>>;
 const clock = (time: number) => `00:${Math.floor(Math.max(0, time)).toString().padStart(2, '0')}`;
 
-function Icon({ name }: { name: 'play' | 'pause' | 'sound' | 'mute' | 'full' | 'download' | 'close' | 'replay' }) {
+function Icon({ name }: { name: 'play' | 'pause' | 'sound' | 'mute' | 'full' | 'download' | 'close' | 'replay' | 'loop' }) {
   const paths = {
     play: 'm8 5 11 7-11 7Z', pause: 'M8 5v14M16 5v14',
     sound: 'M11 5 6 9H3v6h3l5 4ZM15 8a6 6 0 0 1 0 8M18 5a10 10 0 0 1 0 14',
@@ -17,6 +17,7 @@ function Icon({ name }: { name: 'play' | 'pause' | 'sound' | 'mute' | 'full' | '
     full: 'M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5',
     download: 'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5',
     close: 'm6 6 12 12M6 18 18 6', replay: 'M3 10a9 9 0 1 1 1 7M3 3v7h7',
+    loop: 'm17 2 4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4m14-1v2a3 3 0 0 1-3 3H3',
   };
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d={paths[name]} /></svg>;
 }
@@ -41,6 +42,8 @@ export default function ProductFilm({ onClose }: { onClose: () => void }) {
   const [time, setTime] = useState(0);
   const [muted, setMuted] = useState(false);
   const mutedRef = useRef(false);
+  const [looping, setLooping] = useState(true);
+  const loopingRef = useRef(true);
   const [audioLoading, setAudioLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
@@ -116,6 +119,10 @@ export default function ProductFilm({ onClose }: { onClose: () => void }) {
     soundtrack.current?.setMuted(next);
     if (!next && !soundtrack.current && playingRef.current) void play();
   };
+  const toggleLoop = () => {
+    loopingRef.current = !loopingRef.current;
+    setLooping(loopingRef.current);
+  };
 
   useEffect(() => {
     mounted.current = true;
@@ -168,6 +175,13 @@ export default function ProductFilm({ onClose }: { onClose: () => void }) {
           if (playingRef.current && !exportingRef.current) {
             const audioTime = soundtrack.current?.getCurrentTime();
             position.current = Math.min(FILM_DURATION, Math.max(0, audioTime ?? position.current + Math.max(0, now - last) / 1000));
+            if (position.current >= FILM_DURATION && loopingRef.current) {
+              // Restart the complete mix and visual timeline together. Export
+              // runs on its own clock and always records one 48-second film.
+              position.current = 0;
+              soundtrack.current?.play(0);
+              lastUi = 0;
+            }
             instance?.render(position.current);
             if (now - lastUi > 80 || position.current === FILM_DURATION) {
               setTime(position.current);
@@ -291,6 +305,7 @@ export default function ProductFilm({ onClose }: { onClose: () => void }) {
               {muted && <span className="product-film__sound-hint">SOUND ON FOR THE FULL EXPERIENCE</span>}
             </div>
             <div className="product-film__tools">
+              <button className="product-film__export product-film__loop" type="button" disabled={!ready || exporting} onClick={toggleLoop} aria-label="Loop film" aria-pressed={looping} title={looping ? 'Turn looping off' : 'Turn looping on'}><Icon name="loop" /><span>Loop {looping ? 'on' : 'off'}</span></button>
               {exporting ? <button className="product-film__text-button" onClick={() => exportAbort.current?.abort()}>Cancel export</button> : <button className="product-film__export" type="button" onClick={() => void exportVideo()} disabled={!ready} aria-label="Download film as a video"><Icon name="download" /><span>Save film</span></button>}
               <button className="product-film__icon" type="button" onClick={fullscreen} aria-label="Fullscreen"><Icon name="full" /></button>
             </div>
